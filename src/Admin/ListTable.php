@@ -220,6 +220,14 @@ class ListTable extends WP_List_Table {
 	 * @return array<string, array{0:string,1:bool}>
 	 */
 	public function get_sortable_columns(): array {
+		// Compact (user-profile embed) is a fixed "recent activity"
+		// widget showing newest-first — clickable sort headers there
+		// would invite admins to re-order what's meant to be a stable
+		// chronological log. Drop them entirely.
+		if ( $this->compact ) {
+			return [];
+		}
+
 		return [
 			'date'     => [ 'date_created', true ],   // default-desc
 			'username' => [ 'identifier', false ],
