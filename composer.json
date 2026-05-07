@@ -1,0 +1,25 @@
+{
+    "name": "arraypress/wp-login-activity",
+    "description": "Lightweight login activity tracking for WordPress with country-based new-location alerts. BerlinDB storage, visitor-country geo, no bloat.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "version": "2.0.0",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "authors": [
+        {
+            "name": "David Sherlock",
+            "homepage": "https://arraypress.com/"
+        }
+    ],
+    "require": {
+        "php": ">=8.0",
+        "berlindb/core": "^2.0",
+        "arraypress/visitor-country": "dev-main"
+    },
+    "autoload": {
+        "psr-4": {
+            "ArrayPress\\WP\\LoginActivity\\": "src/"
+        }
+    }
+}
