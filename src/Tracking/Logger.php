@@ -60,13 +60,17 @@ class Logger {
 		// PHP type-coerces any unexpected input shape, and silent
 		// hook-handler exceptions in WP get swallowed before they
 		// reach error_log on most setups.
-		add_action( 'wp_login',        [ $this, 'on_login' ], 10, 2 );
-		add_action( 'wp_login_failed', [ $this, 'on_login_failed' ], 10, 2 );
-		add_action( 'wp_logout',       [ $this, 'on_logout' ], 10, 1 );
-		add_action( 'user_register',   [ $this, 'on_user_register' ], 10, 1 );
-		add_action( 'profile_update',  [ $this, 'on_profile_update' ], 10, 2 );
-		add_action( 'password_reset',  [ $this, 'on_password_reset' ], 10, 1 );
-		add_action( 'set_user_role',   [ $this, 'on_set_user_role' ], 10, 3 );
+		add_action( 'wp_login',             [ $this, 'on_login' ], 10, 2 );
+		add_action( 'wp_login_failed',      [ $this, 'on_login_failed' ], 10, 2 );
+		add_action( 'wp_logout',            [ $this, 'on_logout' ], 10, 1 );
+		add_action( 'user_register',        [ $this, 'on_user_register' ], 10, 1 );
+		add_action( 'profile_update',       [ $this, 'on_profile_update' ], 10, 2 );
+		// `after_password_reset` fires AFTER wp_set_password commits;
+		// `password_reset` fires BEFORE. Hook only the post-commit
+		// action so the audit-log row reflects a state that's
+		// actually true. Hooking both would double-record.
+		add_action( 'after_password_reset', [ $this, 'on_password_reset' ], 10, 1 );
+		add_action( 'set_user_role',        [ $this, 'on_set_user_role' ], 10, 3 );
 	}
 
 	/**
@@ -192,8 +196,22 @@ class Logger {
 			return;
 		}
 
-		$current = get_userdata( $user_id );
-		if ( ! $current ) {
+		// Direct DB read for the NEW user row — bypasses WP's user-
+		// data cache, which can still hold the pre-update row when
+		// `profile_update` fires (the cache cleanup in wp_insert_user
+		// happens around the same point as the action and the order
+		// has shifted between WP releases). `get_userdata()` was
+		// returning the stale pre-update row here, so the password +
+		// email comparisons saw OLD === OLD and never recorded the
+		// event. Reading the wp_users table directly is the cheapest
+		// way to guarantee we see post-update values.
+		global $wpdb;
+		$row = $wpdb->get_row( $wpdb->prepare(
+			"SELECT user_login, user_pass, user_email FROM {$wpdb->users} WHERE ID = %d",
+			$user_id
+		) );
+
+		if ( ! $row ) {
 			return;
 		}
 
@@ -203,9 +221,9 @@ class Logger {
 		if (
 			get_option( 'wp_login_activity_log_password_changes', 1 )
 			&& isset( $old_user_data->user_pass )
-			&& $current->user_pass !== $old_user_data->user_pass
+			&& (string) $row->user_pass !== (string) $old_user_data->user_pass
 		) {
-			$this->record( 'password_changed', $user_id, (string) $current->user_login );
+			$this->record( 'password_changed', $user_id, (string) $row->user_login );
 		}
 
 		// Email change — case-insensitive comparison so a re-save with
@@ -213,12 +231,12 @@ class Logger {
 		if (
 			get_option( 'wp_login_activity_log_email_changes', 1 )
 			&& isset( $old_user_data->user_email )
-			&& strtolower( (string) $current->user_email ) !== strtolower( (string) $old_user_data->user_email )
+			&& strtolower( (string) $row->user_email ) !== strtolower( (string) $old_user_data->user_email )
 		) {
 			// Identifier captures the OLD → NEW email transition so
 			// the admin alert can surface "user X switched from
 			// foo@old to bar@new" without joining tables.
-			$identifier = sprintf( '%s → %s', $old_user_data->user_email, $current->user_email );
+			$identifier = sprintf( '%s → %s', $old_user_data->user_email, $row->user_email );
 			$this->record( 'email_changed', $user_id, $identifier );
 		}
 	}
