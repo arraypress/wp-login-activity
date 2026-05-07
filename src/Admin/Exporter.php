@@ -146,6 +146,28 @@ class Exporter {
 			$args['search'] = $search;
 		}
 
+		// Date range — same parsing as ListTable so an export
+		// inherits whatever the admin filtered on the page.
+		$from_raw = isset( $_REQUEST['from'] ) ? sanitize_text_field( (string) $_REQUEST['from'] ) : '';
+		$to_raw   = isset( $_REQUEST['to'] )   ? sanitize_text_field( (string) $_REQUEST['to'] )   : '';
+		$from_ts  = $from_raw !== '' ? strtotime( $from_raw . ' 00:00:00' ) : 0;
+		$to_ts    = $to_raw   !== '' ? strtotime( $to_raw   . ' 23:59:59' ) : 0;
+
+		if ( $from_ts > 0 || $to_ts > 0 ) {
+			$clause = [ 'inclusive' => true ];
+			if ( $from_ts > 0 ) {
+				$clause['after'] = gmdate( 'Y-m-d H:i:s', $from_ts );
+			}
+			if ( $to_ts > 0 ) {
+				$clause['before'] = gmdate( 'Y-m-d H:i:s', $to_ts );
+			}
+			$args['date_created_query'] = [ $clause ];
+		}
+
+		if ( ! empty( $_REQUEST['is_new_country'] ) ) {
+			$args['is_new_country'] = 1;
+		}
+
 		return $args;
 	}
 

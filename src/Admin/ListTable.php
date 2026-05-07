@@ -387,6 +387,94 @@ class ListTable extends WP_List_Table {
 	}
 
 	/**
+	 * Build the BerlinDB date_created_query payload from the
+	 * `from` / `to` URL params.
+	 *
+	 * Both bounds are optional — admin can scope "from a date with
+	 * no upper bound" (audit since incident X), "up to a date with
+	 * no lower bound" (everything before retention purges it), or
+	 * a closed range. Returns empty array when neither input is set
+	 * so the query stays unfiltered.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return array
+	 */
+	private function build_date_query(): array {
+		$from_raw = isset( $_REQUEST['from'] ) ? sanitize_text_field( (string) $_REQUEST['from'] ) : '';
+		$to_raw   = isset( $_REQUEST['to'] )   ? sanitize_text_field( (string) $_REQUEST['to'] )   : '';
+
+		$from_ts = $from_raw !== '' ? strtotime( $from_raw . ' 00:00:00' ) : 0;
+		$to_ts   = $to_raw   !== '' ? strtotime( $to_raw   . ' 23:59:59' ) : 0;
+
+		if ( $from_ts <= 0 && $to_ts <= 0 ) {
+			return [];
+		}
+
+		$clause = [ 'inclusive' => true ];
+
+		if ( $from_ts > 0 ) {
+			$clause['after'] = gmdate( 'Y-m-d H:i:s', $from_ts );
+		}
+
+		if ( $to_ts > 0 ) {
+			$clause['before'] = gmdate( 'Y-m-d H:i:s', $to_ts );
+		}
+
+		return [ $clause ];
+	}
+
+	/**
+	 * Render the date-range filter inputs above the table.
+	 *
+	 * `extra_tablenav` is the WP_List_Table extension point for
+	 * non-bulk-action filters. Renders inside the standard tablenav
+	 * div which is inside the form ActivityPage wraps display() in,
+	 * so the inputs auto-submit via the existing Filter button.
+	 *
+	 * Bottom tablenav skipped — duplicating the filter inputs at the
+	 * page foot adds noise without value.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $which 'top' or 'bottom'.
+	 *
+	 * @return void
+	 */
+	protected function extra_tablenav( $which ): void {
+		if ( $which !== 'top' || $this->compact ) {
+			return;
+		}
+
+		$from = isset( $_GET['from'] ) ? sanitize_text_field( (string) $_GET['from'] ) : '';
+		$to   = isset( $_GET['to'] )   ? sanitize_text_field( (string) $_GET['to'] )   : '';
+
+		?>
+		<div class="alignleft actions" style="display:inline-flex;gap:6px;align-items:center;">
+			<label for="wpla-from" class="screen-reader-text"><?php esc_html_e( 'From', 'wp-login-activity' ); ?></label>
+			<input type="date"
+			       id="wpla-from"
+			       name="from"
+			       value="<?php echo esc_attr( $from ); ?>"
+			       placeholder="<?php esc_attr_e( 'From', 'wp-login-activity' ); ?>"
+			       title="<?php esc_attr_e( 'From date (inclusive)', 'wp-login-activity' ); ?>" />
+
+			<span aria-hidden="true">–</span>
+
+			<label for="wpla-to" class="screen-reader-text"><?php esc_html_e( 'To', 'wp-login-activity' ); ?></label>
+			<input type="date"
+			       id="wpla-to"
+			       name="to"
+			       value="<?php echo esc_attr( $to ); ?>"
+			       placeholder="<?php esc_attr_e( 'To', 'wp-login-activity' ); ?>"
+			       title="<?php esc_attr_e( 'To date (inclusive)', 'wp-login-activity' ); ?>" />
+
+			<input type="submit" class="button" value="<?php esc_attr_e( 'Filter', 'wp-login-activity' ); ?>" />
+		</div>
+		<?php
+	}
+
+	/**
 	 * Suppress the tablenav (top + bottom) entirely in compact mode.
 	 *
 	 * `WP_List_Table::display()` calls `display_tablenav('top')` then
@@ -768,6 +856,21 @@ class ListTable extends WP_List_Table {
 		$search = isset( $_REQUEST['s'] ) ? sanitize_text_field( wp_unslash( (string) $_REQUEST['s'] ) ) : '';
 		if ( $search !== '' ) {
 			$args['search'] = $search;
+		}
+
+		// Date range — both ends optional. We expand the YYYY-MM-DD
+		// input to start-of-day / end-of-day so an admin filtering
+		// "from 2026-05-01 to 2026-05-01" gets rows from the WHOLE
+		// of May 1 instead of just 00:00:00 sharp.
+		$date_query = $this->build_date_query();
+		if ( ! empty( $date_query ) ) {
+			$args['date_created_query'] = $date_query;
+		}
+
+		// Optional: filter to first-time-country-only rows when
+		// the quick-stats "New-country logins" link is followed.
+		if ( ! empty( $_REQUEST['is_new_country'] ) ) {
+			$args['is_new_country'] = 1;
 		}
 
 		$query        = Plugin::query();

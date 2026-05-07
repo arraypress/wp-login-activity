@@ -248,7 +248,7 @@ class ActivityPage {
 		// the SAME rows the admin can see, not the entire table.
 		$export_filters = array_intersect_key(
 			$_GET,
-			array_flip( [ 'event_type', 'user_id', 's', 'orderby', 'order' ] )
+			array_flip( [ 'event_type', 'user_id', 's', 'orderby', 'order', 'from', 'to', 'is_new_country' ] )
 		);
 		$export_url = Exporter::url( $export_filters );
 
@@ -260,6 +260,8 @@ class ActivityPage {
 			</a>
 			<hr class="wp-header-end" />
 
+			<?php $this->render_quick_stats(); ?>
+
 			<?php $this->list_table->views(); ?>
 
 			<form method="get">
@@ -267,8 +269,10 @@ class ActivityPage {
 
 				<?php
 				// Persist any active filters across pagination/sort
-				// without losing them.
-				foreach ( [ 'event_type', 'user_id' ] as $key ) {
+				// without losing them. `from` / `to` are exposed as
+				// real inputs in extra_tablenav so they don't need
+				// hidden duplicates here.
+				foreach ( [ 'event_type', 'user_id', 'is_new_country' ] as $key ) {
 					if ( ! empty( $_GET[ $key ] ) ) {
 						printf(
 							'<input type="hidden" name="%s" value="%s" />',
@@ -286,6 +290,136 @@ class ActivityPage {
 
 		<?php $this->print_inline_assets(); ?>
 		<?php
+	}
+
+	/**
+	 * Render the quick-stats summary above the status link bar.
+	 *
+	 * Three operational counters covering whatever date window is
+	 * currently filtered (or the last 24 hours when no filter is
+	 * set). Each counter is a clickable drill-in URL that combines
+	 * the current filter context with the counter's own scope —
+	 * clicking "Failed logins" while a date range is set scopes
+	 * BOTH conditions in the resulting view.
+	 *
+	 * The four queries are indexed COUNTs against the activity
+	 * table (event_type, is_new_country are both indexed columns)
+	 * so the cost is negligible even on busy sites.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return void
+	 */
+	private function render_quick_stats(): void {
+		$base_args = $this->stats_window_args();
+		$base_url  = admin_url( 'users.php?page=wp-login-activity' );
+
+		// Preserve any active date / user / search filter on the
+		// drill-in links so clicking a stat doesn't widen the view.
+		$preserve_url_args = array_intersect_key(
+			$_GET,
+			array_flip( [ 'from', 'to', 'user_id', 's' ] )
+		);
+
+		// If no explicit filter is set, the stats default to last
+		// 24h — show that fact in the labels for transparency.
+		$is_default_window = empty( $_GET['from'] ) && empty( $_GET['to'] );
+		$window_label      = $is_default_window
+			? __( 'last 24 hours', 'wp-login-activity' )
+			: __( 'in the selected range', 'wp-login-activity' );
+
+		$query = \ArrayPress\WP\LoginActivity\Plugin::query();
+
+		$total = (int) $query->query( array_merge( $base_args, [ 'count' => true, 'number' => 0 ] ) );
+		$failed = (int) $query->query( array_merge( $base_args, [ 'count' => true, 'number' => 0, 'event_type' => 'login_failed' ] ) );
+		$new_country = (int) $query->query( array_merge( $base_args, [ 'count' => true, 'number' => 0, 'is_new_country' => 1, 'event_type' => 'login' ] ) );
+
+		// Default-window URL: when the stats default to last 24h,
+		// the drill-in URLs should explicitly carry from=24h-ago so
+		// the resulting filtered view reflects the same window.
+		$window_url_args = $preserve_url_args;
+		if ( $is_default_window ) {
+			$window_url_args['from'] = gmdate( 'Y-m-d', time() - DAY_IN_SECONDS );
+		}
+
+		$total_url       = add_query_arg( $window_url_args, $base_url );
+		$failed_url      = add_query_arg( array_merge( $window_url_args, [ 'event_type' => 'login_failed' ] ), $base_url );
+		$new_country_url = add_query_arg( array_merge( $window_url_args, [ 'event_type' => 'login', 'is_new_country' => '1' ] ), $base_url );
+
+		?>
+		<div class="wpla-stats" style="display:flex;gap:16px;flex-wrap:wrap;margin:14px 0;padding:14px 18px;background:#fff;border:1px solid #c3c4c7;border-radius:4px;">
+			<div>
+				<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#646970;"><?php esc_html_e( 'Events', 'wp-login-activity' ); ?></div>
+				<div style="font-size:22px;font-weight:600;line-height:1.2;">
+					<a href="<?php echo esc_url( $total_url ); ?>"><?php echo esc_html( number_format_i18n( $total ) ); ?></a>
+				</div>
+				<div style="font-size:11px;color:#646970;"><?php echo esc_html( $window_label ); ?></div>
+			</div>
+
+			<div style="border-left:1px solid #e0e0e0;padding-left:16px;">
+				<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#9b1c1c;"><?php esc_html_e( 'Failed logins', 'wp-login-activity' ); ?></div>
+				<div style="font-size:22px;font-weight:600;line-height:1.2;color:<?php echo $failed > 0 ? '#9b1c1c' : '#1d2327'; ?>;">
+					<a href="<?php echo esc_url( $failed_url ); ?>" style="color:inherit;"><?php echo esc_html( number_format_i18n( $failed ) ); ?></a>
+				</div>
+				<div style="font-size:11px;color:#646970;"><?php echo esc_html( $window_label ); ?></div>
+			</div>
+
+			<div style="border-left:1px solid #e0e0e0;padding-left:16px;">
+				<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#92400e;"><?php esc_html_e( 'New-country logins', 'wp-login-activity' ); ?></div>
+				<div style="font-size:22px;font-weight:600;line-height:1.2;color:<?php echo $new_country > 0 ? '#92400e' : '#1d2327'; ?>;">
+					<a href="<?php echo esc_url( $new_country_url ); ?>" style="color:inherit;"><?php echo esc_html( number_format_i18n( $new_country ) ); ?></a>
+				</div>
+				<div style="font-size:11px;color:#646970;"><?php echo esc_html( $window_label ); ?></div>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * BerlinDB query args representing the date window the quick-
+	 * stats counters cover. Mirrors ListTable's date-filter parsing
+	 * so the stats reflect the SAME rows the table is showing.
+	 *
+	 * Falls back to "last 24 hours" when no explicit from/to is set,
+	 * giving admins useful at-a-glance numbers on first page-load.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return array
+	 */
+	private function stats_window_args(): array {
+		$from_raw = isset( $_GET['from'] ) ? sanitize_text_field( (string) $_GET['from'] ) : '';
+		$to_raw   = isset( $_GET['to'] )   ? sanitize_text_field( (string) $_GET['to'] )   : '';
+
+		$from_ts = $from_raw !== '' ? strtotime( $from_raw . ' 00:00:00' ) : 0;
+		$to_ts   = $to_raw   !== '' ? strtotime( $to_raw   . ' 23:59:59' ) : 0;
+
+		// Default window: last 24 hours. Gives "is anything happening
+		// right now?" without needing the admin to set a filter.
+		if ( $from_ts <= 0 && $to_ts <= 0 ) {
+			$from_ts = time() - DAY_IN_SECONDS;
+		}
+
+		$clause = [ 'inclusive' => true ];
+		if ( $from_ts > 0 ) {
+			$clause['after'] = gmdate( 'Y-m-d H:i:s', $from_ts );
+		}
+		if ( $to_ts > 0 ) {
+			$clause['before'] = gmdate( 'Y-m-d H:i:s', $to_ts );
+		}
+
+		$args = [ 'date_created_query' => [ $clause ] ];
+
+		// Inherit the active user / search filters so the stats
+		// reflect the SAME scope the table shows.
+		if ( ! empty( $_GET['user_id'] ) ) {
+			$args['user_id'] = absint( (string) $_GET['user_id'] );
+		}
+		if ( ! empty( $_GET['s'] ) ) {
+			$args['search'] = sanitize_text_field( wp_unslash( (string) $_GET['s'] ) );
+		}
+
+		return $args;
 	}
 
 	/**
