@@ -56,13 +56,6 @@ class ListTable extends WP_List_Table {
 	public const PER_PAGE_OPTION = 'wpla_per_page';
 
 	/**
-	 * The screen-option key for relative-time rendering.
-	 *
-	 * @since 2.0.0
-	 */
-	public const RELATIVE_TIME_OPTION = 'wpla_relative_time';
-
-	/**
 	 * Default rows-per-page when no screen-option set.
 	 *
 	 * @since 2.0.0
@@ -111,12 +104,25 @@ class ListTable extends WP_List_Table {
 		$this->forced_user_id  = (int) ( $args['user_id'] ?? 0 );
 		$this->forced_per_page = (int) ( $args['per_page'] ?? 0 );
 
-		parent::__construct( [
+		// Screen ID resolution:
+		//   - Full admin page: omit so the parent uses
+		//     `get_current_screen()` and the Screen Options column-
+		//     hide checkboxes register against the actual page hook
+		//     (`users_page_wp-login-activity`).
+		//   - Compact mode (user-profile embed): use a synthetic
+		//     handle so Screen Options on profile.php doesn't end
+		//     up showing OUR columns mixed in with WP's own ones.
+		$parent_args = [
 			'singular' => 'activity',
 			'plural'   => 'activities',
 			'ajax'     => false,
-			'screen'   => 'wpla-activity',
-		] );
+		];
+
+		if ( $this->compact ) {
+			$parent_args['screen'] = 'wpla-activity-compact';
+		}
+
+		parent::__construct( $parent_args );
 	}
 
 	/**
@@ -801,41 +807,32 @@ class ListTable extends WP_List_Table {
 			return '—';
 		}
 
-		// Compact (user-profile embed) defaults to relative — that
-		// surface is "at a glance" recent activity, not forensics.
-		// The full admin page respects the user's screen-options
-		// preference (default off so timestamps stay exact).
-		if ( $this->compact ) {
-			$relative = true;
-		} else {
-			$relative = get_user_meta( get_current_user_id(), self::RELATIVE_TIME_OPTION, true ) === '1';
-		}
-
-		// All stored timestamps are UTC.
+		// Stored timestamps are UTC; convert to site timezone for
+		// display via wp_date() (which also handles i18n month names).
 		$ts = strtotime( $row->date_created . ' UTC' );
 		if ( ! $ts ) {
 			return esc_html( $row->date_created );
 		}
 
-		if ( $relative ) {
-			return sprintf(
-				/* translators: %s: human-readable time difference (e.g. "2 hours") */
-				esc_html__( '%s ago', 'wp-login-activity' ),
-				esc_html( human_time_diff( $ts, time() ) )
-			);
-		}
-
-		// Match WP core's Posts/Pages list-table date format:
-		// "2026/02/16 at 3:58 pm". The format strings are translatable
-		// because some locales sort date components differently
-		// (e.g. d/m/Y in many EU locales). `wp_date()` handles the
-		// site-timezone conversion AND the i18n weekday/month names.
-		return sprintf(
+		// Two-line cell — absolute on top, relative muted underneath.
+		// Same shape Posts/Pages list-table uses ("Published" + the
+		// formatted timestamp). We skip the status word since every
+		// activity row is "happened at"; the second line gives the
+		// at-a-glance "how long ago" without an extra toggle.
+		$absolute = sprintf(
 			/* translators: 1: date in Y/m/d format, 2: time in g:i a format */
 			esc_html__( '%1$s at %2$s', 'wp-login-activity' ),
 			esc_html( wp_date( __( 'Y/m/d', 'wp-login-activity' ), $ts ) ),
 			esc_html( wp_date( __( 'g:i a', 'wp-login-activity' ), $ts ) )
 		);
+
+		$relative = sprintf(
+			/* translators: %s: human-readable time difference (e.g. "2 hours") */
+			esc_html__( '%s ago', 'wp-login-activity' ),
+			esc_html( human_time_diff( $ts, time() ) )
+		);
+
+		return $absolute . '<br /><span style="color:#646970;font-size:12px;">' . $relative . '</span>';
 	}
 
 	/**

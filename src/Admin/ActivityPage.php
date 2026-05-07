@@ -60,7 +60,6 @@ class ActivityPage {
 	public function __construct() {
 		add_action( 'admin_menu', [ $this, 'register_menu' ] );
 		add_filter( 'set-screen-option', [ $this, 'persist_screen_option' ], 10, 3 );
-		add_filter( 'screen_settings', [ $this, 'render_extra_screen_options' ], 10, 2 );
 	}
 
 	/**
@@ -107,10 +106,17 @@ class ActivityPage {
 		// preferences so the screen-options checkboxes still win.
 		add_filter( 'default_hidden_columns', [ $this, 'default_hidden_columns' ], 10, 2 );
 
-		$this->maybe_save_extra_screen_options();
 		$this->register_help_tab();
 
 		$this->list_table = new ListTable();
+
+		// Screen-Options-panel column-hide checkboxes drive off
+		// `get_column_headers($screen)`, which reads the
+		// `manage_{$screen_id}_columns` filter. WP_List_Table doesn't
+		// auto-register on this filter — we have to hook it ourselves
+		// so WP knows which checkboxes to render.
+		add_filter( "manage_{$this->hook}_columns", [ $this->list_table, 'get_columns' ] );
+
 		$this->list_table->prepare_items();
 	}
 
@@ -132,82 +138,6 @@ class ActivityPage {
 		}
 
 		return $hidden;
-	}
-
-	/**
-	 * Save the custom Screen Options checkbox values when WP's screen-
-	 * options form is submitted.
-	 *
-	 * The built-in `set-screen-option` filter only handles ONE option
-	 * per screen — fine for `per_page`, not enough for the relative-
-	 * time toggle on top of it. For custom inputs, the standard
-	 * approach is to detect the screen-options POST in `load-{$hook}`
-	 * (which runs before WP's redirect-after-save) and write user
-	 * meta directly.
-	 *
-	 * Relies on the existing `screenoptionnonce` field WP renders
-	 * inside the Screen Options form for CSRF protection.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @return void
-	 */
-	private function maybe_save_extra_screen_options(): void {
-		if ( empty( $_POST['screenoptionnonce'] ) ) {
-			return;
-		}
-
-		if ( ! wp_verify_nonce( sanitize_key( $_POST['screenoptionnonce'] ), 'screen-options-nonce' ) ) {
-			return;
-		}
-
-		$user_id = get_current_user_id();
-		if ( $user_id <= 0 ) {
-			return;
-		}
-
-		$relative = ! empty( $_POST['wpla_relative_time'] ) ? '1' : '0';
-		update_user_meta( $user_id, ListTable::RELATIVE_TIME_OPTION, $relative );
-	}
-
-	/**
-	 * Inject custom checkboxes into the Screen Options panel.
-	 *
-	 * `screen_settings` is the filter that lets you append HTML below
-	 * WP's built-in screen-options inputs. We use it to add a single
-	 * "Show times as relative" checkbox; the surrounding form +
-	 * Apply button + nonce are all rendered by core.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param string     $settings Existing HTML.
-	 * @param \WP_Screen $screen   Current screen object.
-	 *
-	 * @return string
-	 */
-	public function render_extra_screen_options( string $settings, $screen ): string {
-		if ( ! $screen || $screen->id !== $this->hook ) {
-			return $settings;
-		}
-
-		$relative = get_user_meta( get_current_user_id(), ListTable::RELATIVE_TIME_OPTION, true ) === '1';
-
-		ob_start();
-		?>
-		<fieldset class="wpla-extra-screen-options" style="margin-top:8px;">
-			<legend><?php esc_html_e( 'Date format', 'wp-login-activity' ); ?></legend>
-			<label for="wpla_relative_time">
-				<input type="checkbox"
-				       id="wpla_relative_time"
-				       name="wpla_relative_time"
-				       value="1"
-					<?php checked( $relative ); ?> />
-				<?php esc_html_e( 'Show times as relative ("2 hours ago") instead of absolute UTC.', 'wp-login-activity' ); ?>
-			</label>
-		</fieldset>
-		<?php
-
-		return $settings . (string) ob_get_clean();
 	}
 
 	/**
