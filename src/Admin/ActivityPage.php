@@ -101,10 +101,21 @@ class ActivityPage {
 			'option'  => ListTable::PER_PAGE_OPTION,
 		] );
 
-		// Some columns ship hidden by default (Username — forensics
-		// admins toggle it on). WP merges this with each user's saved
-		// preferences so the screen-options checkboxes still win.
+		// Default-hidden columns: covers fresh users (no saved Screen
+		// Options meta yet). The filter only fires when there's no
+		// saved value, so existing users with saved meta from before
+		// new columns existed don't benefit — that's what
+		// `hidden_columns_migration` handles below.
 		add_filter( 'default_hidden_columns', [ $this, 'default_hidden_columns' ], 10, 2 );
+
+		// One-time-per-user migration: when default-hidden columns
+		// are ADDED to an already-released plugin, existing users'
+		// saved hidden-columns lists don't know about them, so the
+		// new columns appear unhidden. Bumping the version below
+		// runs a single force-hide for each user when they next load
+		// the page; after that their saved preferences are honoured
+		// normally.
+		add_filter( 'hidden_columns', [ $this, 'hidden_columns_migration' ], 10, 3 );
 
 		$this->register_help_tab();
 
@@ -136,6 +147,66 @@ class ActivityPage {
 		if ( $screen && $screen->id === $this->hook ) {
 			$hidden = array_unique( array_merge( $hidden, ListTable::get_default_hidden_columns() ) );
 		}
+
+		return $hidden;
+	}
+
+	/**
+	 * One-time-per-user migration of the saved hidden-columns list.
+	 *
+	 * Problem this solves: WP saves the user's hidden-columns list
+	 * to user meta on first Screen-Options Apply. When new columns
+	 * are added later, the saved list doesn't know about them, so
+	 * `default_hidden_columns` (which only fires for users without
+	 * saved meta) never gets to mark them hidden — they show as
+	 * unhidden until the user manually toggles them off.
+	 *
+	 * Fix: track a per-user migration version. Whenever we add new
+	 * default-hidden columns, bump the constant. On the user's next
+	 * page load, this filter notices their saved version is older,
+	 * force-merges the new defaults into their hidden list, and
+	 * stamps the version. From then on their saved preferences are
+	 * honoured normally — explicit toggles after migration win.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string[]   $hidden       Hidden-columns list (may be saved or default).
+	 * @param \WP_Screen $screen       Current screen.
+	 * @param bool       $use_defaults Whether $hidden came from defaults.
+	 *
+	 * @return string[]
+	 */
+	public function hidden_columns_migration( $hidden, $screen, $use_defaults ): array {
+		if ( ! $screen || $screen->id !== $this->hook ) {
+			return (array) $hidden;
+		}
+
+		// Defaults path already handled by `default_hidden_columns` —
+		// no migration needed.
+		if ( $use_defaults ) {
+			return (array) $hidden;
+		}
+
+		$user_id = get_current_user_id();
+		if ( $user_id <= 0 ) {
+			return (array) $hidden;
+		}
+
+		$current_version = ListTable::HIDDEN_COLUMNS_VERSION;
+		$user_version    = (int) get_user_meta( $user_id, 'wpla_hidden_columns_version', true );
+
+		if ( $user_version >= $current_version ) {
+			return (array) $hidden;
+		}
+
+		// Migration: merge defaults into the user's saved list and
+		// stamp the version so we don't keep doing this every load.
+		$hidden = array_values( array_unique( array_merge(
+			(array) $hidden,
+			ListTable::get_default_hidden_columns()
+		) ) );
+
+		update_user_meta( $user_id, 'wpla_hidden_columns_version', $current_version );
 
 		return $hidden;
 	}
@@ -260,8 +331,6 @@ class ActivityPage {
 			</a>
 			<hr class="wp-header-end" />
 
-			<?php $this->render_quick_stats(); ?>
-
 			<?php $this->list_table->views(); ?>
 
 			<form method="get">
@@ -290,136 +359,6 @@ class ActivityPage {
 
 		<?php $this->print_inline_assets(); ?>
 		<?php
-	}
-
-	/**
-	 * Render the quick-stats summary above the status link bar.
-	 *
-	 * Three operational counters covering whatever date window is
-	 * currently filtered (or the last 24 hours when no filter is
-	 * set). Each counter is a clickable drill-in URL that combines
-	 * the current filter context with the counter's own scope —
-	 * clicking "Failed logins" while a date range is set scopes
-	 * BOTH conditions in the resulting view.
-	 *
-	 * The four queries are indexed COUNTs against the activity
-	 * table (event_type, is_new_country are both indexed columns)
-	 * so the cost is negligible even on busy sites.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @return void
-	 */
-	private function render_quick_stats(): void {
-		$base_args = $this->stats_window_args();
-		$base_url  = admin_url( 'users.php?page=wp-login-activity' );
-
-		// Preserve any active date / user / search filter on the
-		// drill-in links so clicking a stat doesn't widen the view.
-		$preserve_url_args = array_intersect_key(
-			$_GET,
-			array_flip( [ 'from', 'to', 'user_id', 's' ] )
-		);
-
-		// If no explicit filter is set, the stats default to last
-		// 24h — show that fact in the labels for transparency.
-		$is_default_window = empty( $_GET['from'] ) && empty( $_GET['to'] );
-		$window_label      = $is_default_window
-			? __( 'last 24 hours', 'wp-login-activity' )
-			: __( 'in the selected range', 'wp-login-activity' );
-
-		$query = \ArrayPress\WP\LoginActivity\Plugin::query();
-
-		$total = (int) $query->query( array_merge( $base_args, [ 'count' => true, 'number' => 0 ] ) );
-		$failed = (int) $query->query( array_merge( $base_args, [ 'count' => true, 'number' => 0, 'event_type' => 'login_failed' ] ) );
-		$new_country = (int) $query->query( array_merge( $base_args, [ 'count' => true, 'number' => 0, 'is_new_country' => 1, 'event_type' => 'login' ] ) );
-
-		// Default-window URL: when the stats default to last 24h,
-		// the drill-in URLs should explicitly carry from=24h-ago so
-		// the resulting filtered view reflects the same window.
-		$window_url_args = $preserve_url_args;
-		if ( $is_default_window ) {
-			$window_url_args['from'] = gmdate( 'Y-m-d', time() - DAY_IN_SECONDS );
-		}
-
-		$total_url       = add_query_arg( $window_url_args, $base_url );
-		$failed_url      = add_query_arg( array_merge( $window_url_args, [ 'event_type' => 'login_failed' ] ), $base_url );
-		$new_country_url = add_query_arg( array_merge( $window_url_args, [ 'event_type' => 'login', 'is_new_country' => '1' ] ), $base_url );
-
-		?>
-		<div class="wpla-stats" style="display:flex;gap:16px;flex-wrap:wrap;margin:14px 0;padding:14px 18px;background:#fff;border:1px solid #c3c4c7;border-radius:4px;">
-			<div>
-				<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#646970;"><?php esc_html_e( 'Events', 'wp-login-activity' ); ?></div>
-				<div style="font-size:22px;font-weight:600;line-height:1.2;">
-					<a href="<?php echo esc_url( $total_url ); ?>"><?php echo esc_html( number_format_i18n( $total ) ); ?></a>
-				</div>
-				<div style="font-size:11px;color:#646970;"><?php echo esc_html( $window_label ); ?></div>
-			</div>
-
-			<div style="border-left:1px solid #e0e0e0;padding-left:16px;">
-				<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#9b1c1c;"><?php esc_html_e( 'Failed logins', 'wp-login-activity' ); ?></div>
-				<div style="font-size:22px;font-weight:600;line-height:1.2;color:<?php echo $failed > 0 ? '#9b1c1c' : '#1d2327'; ?>;">
-					<a href="<?php echo esc_url( $failed_url ); ?>" style="color:inherit;"><?php echo esc_html( number_format_i18n( $failed ) ); ?></a>
-				</div>
-				<div style="font-size:11px;color:#646970;"><?php echo esc_html( $window_label ); ?></div>
-			</div>
-
-			<div style="border-left:1px solid #e0e0e0;padding-left:16px;">
-				<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#92400e;"><?php esc_html_e( 'New-country logins', 'wp-login-activity' ); ?></div>
-				<div style="font-size:22px;font-weight:600;line-height:1.2;color:<?php echo $new_country > 0 ? '#92400e' : '#1d2327'; ?>;">
-					<a href="<?php echo esc_url( $new_country_url ); ?>" style="color:inherit;"><?php echo esc_html( number_format_i18n( $new_country ) ); ?></a>
-				</div>
-				<div style="font-size:11px;color:#646970;"><?php echo esc_html( $window_label ); ?></div>
-			</div>
-		</div>
-		<?php
-	}
-
-	/**
-	 * BerlinDB query args representing the date window the quick-
-	 * stats counters cover. Mirrors ListTable's date-filter parsing
-	 * so the stats reflect the SAME rows the table is showing.
-	 *
-	 * Falls back to "last 24 hours" when no explicit from/to is set,
-	 * giving admins useful at-a-glance numbers on first page-load.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @return array
-	 */
-	private function stats_window_args(): array {
-		$from_raw = isset( $_GET['from'] ) ? sanitize_text_field( (string) $_GET['from'] ) : '';
-		$to_raw   = isset( $_GET['to'] )   ? sanitize_text_field( (string) $_GET['to'] )   : '';
-
-		$from_ts = $from_raw !== '' ? strtotime( $from_raw . ' 00:00:00' ) : 0;
-		$to_ts   = $to_raw   !== '' ? strtotime( $to_raw   . ' 23:59:59' ) : 0;
-
-		// Default window: last 24 hours. Gives "is anything happening
-		// right now?" without needing the admin to set a filter.
-		if ( $from_ts <= 0 && $to_ts <= 0 ) {
-			$from_ts = time() - DAY_IN_SECONDS;
-		}
-
-		$clause = [ 'inclusive' => true ];
-		if ( $from_ts > 0 ) {
-			$clause['after'] = gmdate( 'Y-m-d H:i:s', $from_ts );
-		}
-		if ( $to_ts > 0 ) {
-			$clause['before'] = gmdate( 'Y-m-d H:i:s', $to_ts );
-		}
-
-		$args = [ 'date_created_query' => [ $clause ] ];
-
-		// Inherit the active user / search filters so the stats
-		// reflect the SAME scope the table shows.
-		if ( ! empty( $_GET['user_id'] ) ) {
-			$args['user_id'] = absint( (string) $_GET['user_id'] );
-		}
-		if ( ! empty( $_GET['s'] ) ) {
-			$args['search'] = sanitize_text_field( wp_unslash( (string) $_GET['s'] ) );
-		}
-
-		return $args;
 	}
 
 	/**

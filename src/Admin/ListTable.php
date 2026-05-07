@@ -64,6 +64,18 @@ class ListTable extends WP_List_Table {
 	private const DEFAULT_PER_PAGE = 50;
 
 	/**
+	 * Version stamp for `get_default_hidden_columns()`. Bump whenever
+	 * a new default-hidden column is added so existing users get the
+	 * one-time merge applied via `ActivityPage::hidden_columns_migration`.
+	 *
+	 *   v1 — initial set (empty)
+	 *   v2 — added: language, referer
+	 *
+	 * @since 2.0.0
+	 */
+	public const HIDDEN_COLUMNS_VERSION = 2;
+
+	/**
 	 * Whether to render in compact mode — used on the user-profile
 	 * screen where a full Settings-page-style table with bulk actions,
 	 * status links, and search would be overkill. Mirrors the

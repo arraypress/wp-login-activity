@@ -108,14 +108,38 @@ class UserColumns {
 			'number'     => 1,
 		] );
 
-		$value = '—';
-
-		if ( ! empty( $rows ) ) {
-			$row   = $rows[0];
-			$value = esc_html( $row->date_created . ' UTC' );
+		if ( empty( $rows ) ) {
+			return $this->last_login_cache[ $user_id ] = '—';
 		}
 
-		return $this->last_login_cache[ $user_id ] = $value;
+		$row = $rows[0];
+
+		// Format matches the activity table's Date column: site-
+		// timezone absolute on top, relative ("X ago") muted
+		// underneath. Posts/Pages list-table convention. Stored
+		// timestamp is UTC, so we strtotime+UTC then wp_date()
+		// converts to the site's configured timezone for display.
+		$ts = strtotime( $row->date_created . ' UTC' );
+
+		if ( ! $ts ) {
+			return $this->last_login_cache[ $user_id ] = esc_html( $row->date_created );
+		}
+
+		$absolute = sprintf(
+			/* translators: 1: date in Y/m/d format, 2: time in g:i a format */
+			esc_html__( '%1$s at %2$s', 'wp-login-activity' ),
+			esc_html( wp_date( __( 'Y/m/d', 'wp-login-activity' ), $ts ) ),
+			esc_html( wp_date( __( 'g:i a', 'wp-login-activity' ), $ts ) )
+		);
+
+		$relative = sprintf(
+			/* translators: %s: human-readable time difference (e.g. "2 hours") */
+			esc_html__( '%s ago', 'wp-login-activity' ),
+			esc_html( human_time_diff( $ts, time() ) )
+		);
+
+		return $this->last_login_cache[ $user_id ] =
+			$absolute . '<br /><span style="color:#646970;font-size:12px;">' . $relative . '</span>';
 	}
 
 }

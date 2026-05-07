@@ -108,6 +108,7 @@ final class Plugin {
 				new Admin\ActivityPage();
 				new Admin\UserProfile();
 				new Admin\UserColumns();
+				new Admin\DashboardWidget();
 			} );
 		}
 	}
