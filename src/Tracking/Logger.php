@@ -27,6 +27,8 @@ defined( 'ABSPATH' ) || exit;
 use ArrayPress\WP\LoginActivity\Plugin;
 use ArrayPress\WP\LoginActivity\Database\Rows\Activity as ActivityRow;
 use ArrayPress\VisitorCountry\Country as VisitorCountry;
+use ArrayPress\IPUtils\IP;
+use ArrayPress\UserAgentUtils\UserAgent;
 use WP_User;
 
 /**
@@ -187,10 +189,10 @@ class Logger {
 	/**
 	 * Get the visitor's IP address.
 	 *
-	 * Walks the standard forwarded-IP-header cascade. CF-Connecting-IP
-	 * wins on Cloudflare, X-Forwarded-For wins behind a generic load
-	 * balancer (taking the leftmost / client-side address), X-Real-IP
-	 * is a common Nginx convention, and REMOTE_ADDR is the fallback.
+	 * Delegates to wp-ip-utils, which already implements the
+	 * CF-Connecting-IP / X-Forwarded-For / X-Real-IP / REMOTE_ADDR
+	 * cascade and does the filter_var validation we'd otherwise
+	 * inline. Returns an empty string when nothing resolves.
 	 *
 	 * Filterable via `wp_login_activity_visitor_ip` for sites with an
 	 * unusual proxy chain.
@@ -200,29 +202,7 @@ class Logger {
 	 * @return string
 	 */
 	private function resolve_ip(): string {
-		$candidates = [
-			'HTTP_CF_CONNECTING_IP',
-			'HTTP_X_FORWARDED_FOR',
-			'HTTP_X_REAL_IP',
-			'REMOTE_ADDR',
-		];
-
-		$ip = '';
-
-		foreach ( $candidates as $header ) {
-			if ( empty( $_SERVER[ $header ] ) ) {
-				continue;
-			}
-
-			// X-Forwarded-For can be a comma-list — leftmost is the
-			// closest-to-client address.
-			$candidate = trim( explode( ',', (string) $_SERVER[ $header ] )[0] );
-
-			if ( filter_var( $candidate, FILTER_VALIDATE_IP ) ) {
-				$ip = $candidate;
-				break;
-			}
-		}
+		$ip = (string) ( IP::get() ?? '' );
 
 		return (string) apply_filters( 'wp_login_activity_visitor_ip', $ip );
 	}
@@ -253,19 +233,30 @@ class Logger {
 	}
 
 	/**
-	 * Get the User-Agent header. Trimmed to a sane upper bound to
-	 * defend against a few-MB UA poisoning the row.
+	 * Get the raw User-Agent header.
+	 *
+	 * **Always store the raw UA string** — formatting (browser/OS
+	 * extraction, "Chrome on Windows" labels) happens at render time
+	 * via wp-user-agent-utils. Storing pre-formatted values would
+	 * lock us into one parser version forever AND lose information
+	 * the bot/device helpers rely on.
+	 *
+	 * Trimmed to 1024 chars to defend against a few-MB UA poisoning
+	 * a row, sanitised against invalid UTF-8 so the column doesn't
+	 * blow up on `text` insert.
 	 *
 	 * @since 2.0.0
 	 *
 	 * @return string
 	 */
 	private function resolve_user_agent(): string {
-		$ua = isset( $_SERVER['HTTP_USER_AGENT'] )
-			? wp_check_invalid_utf8( (string) $_SERVER['HTTP_USER_AGENT'] )
-			: '';
+		$ua = (string) UserAgent::get();
 
-		return mb_substr( $ua, 0, 1024 );
+		if ( $ua === '' ) {
+			return '';
+		}
+
+		return mb_substr( (string) wp_check_invalid_utf8( $ua ), 0, 1024 );
 	}
 
 	/**

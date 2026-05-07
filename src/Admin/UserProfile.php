@@ -76,13 +76,14 @@ class UserProfile {
 		<?php if ( empty( $rows ) ) : ?>
 			<p><?php esc_html_e( 'No activity yet.', 'wp-login-activity' ); ?></p>
 		<?php else : ?>
-			<table class="widefat striped" style="max-width:900px;">
+			<table class="widefat striped" style="max-width:1100px;">
 				<thead>
 					<tr>
 						<th><?php esc_html_e( 'When',    'wp-login-activity' ); ?></th>
 						<th><?php esc_html_e( 'Event',   'wp-login-activity' ); ?></th>
 						<th><?php esc_html_e( 'IP',      'wp-login-activity' ); ?></th>
 						<th><?php esc_html_e( 'Country', 'wp-login-activity' ); ?></th>
+						<th><?php esc_html_e( 'Device',  'wp-login-activity' ); ?></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -97,6 +98,15 @@ class UserProfile {
 								<?php if ( $row->is_new_country() ) : ?>
 									<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:4px;">
 										<?php esc_html_e( 'NEW', 'wp-login-activity' ); ?>
+									</span>
+								<?php endif; ?>
+							</td>
+							<td>
+								<?php $formatted = $row->get_formatted_user_agent(); ?>
+								<?php echo esc_html( $formatted !== '' ? $formatted : '—' ); ?>
+								<?php if ( $row->is_bot() ) : ?>
+									<span style="background:#fde2e2;color:#9b1c1c;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:4px;">
+										<?php esc_html_e( 'BOT', 'wp-login-activity' ); ?>
 									</span>
 								<?php endif; ?>
 							</td>

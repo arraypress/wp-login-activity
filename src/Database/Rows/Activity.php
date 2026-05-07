@@ -19,6 +19,8 @@ namespace ArrayPress\WP\LoginActivity\Database\Rows;
 defined( 'ABSPATH' ) || exit;
 
 use BerlinDB\Database\Row;
+use ArrayPress\UserAgentUtils\UserAgent;
+use ArrayPress\IPUtils\IP;
 
 /**
  * Class Activity
@@ -109,6 +111,108 @@ class Activity extends Row {
 	 */
 	public function is_successful_login(): bool {
 		return $this->event_type === 'login';
+	}
+
+	/* -------------------------------------------------------------------
+	 * User-Agent presentation helpers — derive on read from the stored
+	 * raw UA string. Storing raw means a parser-library upgrade
+	 * automatically improves classification on existing rows; storing
+	 * pre-parsed labels would lock historical rows to whatever the UA
+	 * library knew at insert time.
+	 * ----------------------------------------------------------------- */
+
+	/**
+	 * Browser name (e.g. "Chrome", "Safari", "Firefox").
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string Empty when unknown / no UA stored.
+	 */
+	public function get_browser(): string {
+		if ( $this->user_agent === '' ) {
+			return '';
+		}
+
+		return (string) ( UserAgent::get_browser( $this->user_agent ) ?? '' );
+	}
+
+	/**
+	 * Operating system (e.g. "Windows", "macOS", "iOS").
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string Empty when unknown / no UA stored.
+	 */
+	public function get_os(): string {
+		if ( $this->user_agent === '' ) {
+			return '';
+		}
+
+		return (string) ( UserAgent::get_os( $this->user_agent ) ?? '' );
+	}
+
+	/**
+	 * Device class — `desktop`, `mobile`, `tablet`, `bot`, `unknown`.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	public function get_device_type(): string {
+		if ( $this->user_agent === '' ) {
+			return 'unknown';
+		}
+
+		return (string) UserAgent::get_device_type( $this->user_agent );
+	}
+
+	/**
+	 * Was the request from a recognised bot UA?
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return bool
+	 */
+	public function is_bot(): bool {
+		return $this->user_agent !== '' && UserAgent::is_bot( $this->user_agent );
+	}
+
+	/**
+	 * Pretty-printed UA string for admin display — e.g. "Chrome 123 on
+	 * macOS 14". The raw header stays untouched in the column.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	public function get_formatted_user_agent(): string {
+		if ( $this->user_agent === '' ) {
+			return '';
+		}
+
+		return (string) UserAgent::get_formatted( $this->user_agent );
+	}
+
+	/* -------------------------------------------------------------------
+	 * IP presentation helpers
+	 * ----------------------------------------------------------------- */
+
+	/**
+	 * GDPR-anonymised IP — last octet of IPv4 zeroed, last 80 bits of
+	 * IPv6 zeroed. Use in any UI surface that gets exported / shared
+	 * outside the admin (CSV exports, support emails). The raw IP
+	 * stays in the column for novelty checks + abuse correlation.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	public function get_anonymised_ip(): string {
+		if ( $this->ip_address === '' ) {
+			return '';
+		}
+
+		return (string) ( IP::anonymize( $this->ip_address ) ?? $this->ip_address );
 	}
 
 }

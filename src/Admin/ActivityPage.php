@@ -98,17 +98,18 @@ class ActivityPage {
 			<table class="wp-list-table widefat fixed striped">
 				<thead>
 					<tr>
-						<th scope="col"><?php esc_html_e( 'When', 'wp-login-activity' ); ?></th>
-						<th scope="col"><?php esc_html_e( 'User', 'wp-login-activity' ); ?></th>
-						<th scope="col"><?php esc_html_e( 'Event', 'wp-login-activity' ); ?></th>
-						<th scope="col"><?php esc_html_e( 'IP', 'wp-login-activity' ); ?></th>
+						<th scope="col"><?php esc_html_e( 'When',    'wp-login-activity' ); ?></th>
+						<th scope="col"><?php esc_html_e( 'User',    'wp-login-activity' ); ?></th>
+						<th scope="col"><?php esc_html_e( 'Event',   'wp-login-activity' ); ?></th>
+						<th scope="col"><?php esc_html_e( 'IP',      'wp-login-activity' ); ?></th>
 						<th scope="col"><?php esc_html_e( 'Country', 'wp-login-activity' ); ?></th>
+						<th scope="col"><?php esc_html_e( 'Device',  'wp-login-activity' ); ?></th>
 					</tr>
 				</thead>
 				<tbody>
 					<?php if ( empty( $rows ) ) : ?>
 						<tr>
-							<td colspan="5">
+							<td colspan="6">
 								<?php esc_html_e( 'No activity recorded yet.', 'wp-login-activity' ); ?>
 							</td>
 						</tr>
@@ -214,6 +215,15 @@ class ActivityPage {
 				<?php if ( $row->is_new_country() ) : ?>
 					<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:4px;">
 						<?php esc_html_e( 'NEW', 'wp-login-activity' ); ?>
+					</span>
+				<?php endif; ?>
+			</td>
+			<td>
+				<?php $formatted = $row->get_formatted_user_agent(); ?>
+				<?php echo esc_html( $formatted !== '' ? $formatted : '—' ); ?>
+				<?php if ( $row->is_bot() ) : ?>
+					<span style="background:#fde2e2;color:#9b1c1c;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:4px;">
+						<?php esc_html_e( 'BOT', 'wp-login-activity' ); ?>
 					</span>
 				<?php endif; ?>
 			</td>

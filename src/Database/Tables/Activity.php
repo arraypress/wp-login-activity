@@ -31,14 +31,16 @@ use BerlinDB\Database\Table;
 final class Activity extends Table {
 
 	/**
-	 * Table name (no prefix). BerlinDB prepends `$wpdb->prefix` plus
-	 * the `db_global` value (configured via the Plugin) to produce the
-	 * final `wp_wpla_activity` name.
+	 * Table name (no prefix). BerlinDB prepends `$wpdb->prefix` to
+	 * produce the final `wp_wpla_activity` name. The `wpla_` segment
+	 * lives in the name itself (rather than via a separate prefix
+	 * property) so cross-plugin name collisions on a generic word like
+	 * "activity" are impossible.
 	 *
 	 * @since 2.0.0
 	 * @var   string
 	 */
-	protected $name = 'activity';
+	protected $name = 'wpla_activity';
 
 	/**
 	 * Schema version — bump when adding/changing columns or indexes
