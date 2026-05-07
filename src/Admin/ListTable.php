@@ -70,10 +70,15 @@ class ListTable extends WP_List_Table {
 	 *
 	 *   v1 — initial set (empty)
 	 *   v2 — added: language, referer
+	 *   v3 — added: name, role, device. Plugin pivoted to a 5-column
+	 *        minimal main view (Username, Event, IP, Country, Date)
+	 *        with everything else moved into the flyout panel; users
+	 *        can still toggle the hidden columns back on via Screen
+	 *        Options when they want full-table mode.
 	 *
 	 * @since 2.0.0
 	 */
-	public const HIDDEN_COLUMNS_VERSION = 2;
+	public const HIDDEN_COLUMNS_VERSION = 3;
 
 	/**
 	 * Whether to render in compact mode — used on the user-profile
@@ -208,7 +213,11 @@ class ListTable extends WP_List_Table {
 	 * @return string[]
 	 */
 	public static function get_default_hidden_columns(): array {
-		return [ 'language', 'referer' ];
+		// Plugin's default UX is a minimal 5-column main view; the
+		// flyout panel surfaces everything else on demand. These
+		// columns stay hideable so admins who prefer full-table
+		// mode can toggle them back on via Screen Options.
+		return [ 'name', 'role', 'device', 'language', 'referer' ];
 	}
 
 	/**
@@ -699,12 +708,11 @@ class ListTable extends WP_List_Table {
 	 */
 	public function single_row( $item ): void {
 		// Manual zebra striping. WP's `striped` class uses
-		// `tr:nth-child(odd)`, which counts EVERY child including the
-		// hidden detail rows we inject between data rows — that
-		// throws the alternation off and ends up colouring every
-		// data row the same. We toggle a class ourselves and override
-		// WP's selector via inline CSS so the alternation tracks
-		// data rows only.
+		// `tr:nth-child(odd)`, which counts EVERY child — and the
+		// pre-flyout era injected hidden detail rows that threw the
+		// parity off. The flyout removes that issue but we keep the
+		// manual striping so the override is unambiguous regardless
+		// of any future row injections.
 		static $stripe_index = 0;
 		$stripe_index++;
 
@@ -725,23 +733,46 @@ class ListTable extends WP_List_Table {
 		);
 		$this->single_row_columns( $item );
 		echo '</tr>';
-
-		// Detail row — hidden by default; JS toggles `hidden` attr.
-		// Skipped in compact mode (the embed surface is already
-		// space-constrained; full details belong on the main page).
-		if ( ! $this->compact ) {
-			$this->render_detail_row( $item );
-		}
 	}
 
 	/**
-	 * Render the JS-toggled detail row.
+	 * Render the after-table block that powers the flyout panel.
 	 *
-	 * Shows everything that doesn't fit in the main columns: raw
-	 * User-Agent, country source, identifier (typed value), referer,
-	 * actor (when distinct from subject), session-current marker,
-	 * UUID. One `<tr><td colspan>` collapsing the detail into a
-	 * single grid cell.
+	 * Outputs one `<template id="wpla-detail-{N}">` per visible row
+	 * holding the row's detail HTML (sectioned: USER / WHERE / HOW /
+	 * RAW), plus the flyout shell itself (one container, reused
+	 * across all rows) and a backdrop. JS clones the matching
+	 * template into the flyout body when "View details" is clicked.
+	 *
+	 * Templates live OUTSIDE the table — `<template>` isn't a valid
+	 * direct child of `<tbody>` and gets reparented by the parser
+	 * when nested inside one.
+	 *
+	 * Skipped in compact mode (no flyout on the user-profile embed
+	 * — that surface is space-constrained already).
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return void
+	 */
+	public function render_flyout_payload(): void {
+		if ( $this->compact || empty( $this->items ) ) {
+			return;
+		}
+
+		foreach ( $this->items as $item ) {
+			if ( ! $item instanceof ActivityRow ) {
+				continue;
+			}
+			$this->render_detail_template( $item );
+		}
+
+		$this->render_flyout_shell();
+	}
+
+	/**
+	 * One per-row detail `<template>` — content cloned into the
+	 * flyout on demand.
 	 *
 	 * @since 2.0.0
 	 *
@@ -749,73 +780,177 @@ class ListTable extends WP_List_Table {
 	 *
 	 * @return void
 	 */
-	private function render_detail_row( ActivityRow $row ): void {
-		$column_count = count( $this->get_columns() );
+	private function render_detail_template( ActivityRow $row ): void {
+		?>
+		<template id="wpla-detail-<?php echo (int) $row->id; ?>">
+			<?php $this->render_detail_body( $row ); ?>
+		</template>
+		<?php
+	}
 
-		// Collect KV pairs — only include rows that have meaningful
-		// values, so the detail isn't padded with em-dashes.
-		$pairs = [];
+	/**
+	 * Sectioned detail layout for one row — USER / WHERE / HOW / RAW.
+	 *
+	 * Rendered inside the flyout body. Each section is a `<dl>` of
+	 * label/value pairs with empty values filtered out so the layout
+	 * doesn't fill with em-dashes for fields the row didn't have.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row Row.
+	 *
+	 * @return void
+	 */
+	private function render_detail_body( ActivityRow $row ): void {
+		$user    = $row->user_id > 0 ? get_userdata( $row->user_id ) : false;
+		$avatar  = $user ? get_avatar( $row->user_id, 48 ) : '';
+		$display = $user ? (string) $user->display_name : $row->get_display_name();
 
-		$pairs[ __( 'When (UTC)',     'wp-login-activity' ) ] = $row->date_created;
-		$pairs[ __( 'Identifier',     'wp-login-activity' ) ] = $row->identifier !== '' ? $row->identifier : '—';
-		$pairs[ __( 'Country source', 'wp-login-activity' ) ] = $row->country_source !== '' ? $row->country_source : '—';
-		$pairs[ __( 'Anonymised IP',  'wp-login-activity' ) ] = $row->get_anonymised_ip() !== '' ? $row->get_anonymised_ip() : '—';
+		// Drill-in URLs for the action buttons at the foot.
+		$base_url      = admin_url( 'users.php?page=wp-login-activity' );
+		$filter_user_url = $row->user_id > 0
+			? add_query_arg( 'user_id', (int) $row->user_id, $base_url )
+			: '';
+		$filter_ip_url = $row->ip_address !== ''
+			? add_query_arg( 's', $row->ip_address, $base_url )
+			: '';
+		$ipinfo_url    = $row->ip_address !== ''
+			? 'https://ipinfo.io/' . rawurlencode( $row->ip_address )
+			: '';
+		$delete_url = wp_nonce_url(
+			add_query_arg( [ 'action' => 'delete', 'activity' => (int) $row->id ], $base_url ),
+			'wpla_delete_' . (int) $row->id
+		);
 
-		$browser = $row->get_browser();
-		$os      = $row->get_os();
-		if ( $browser !== '' || $os !== '' ) {
-			$pairs[ __( 'Browser / OS', 'wp-login-activity' ) ] = trim( $browser . ' / ' . $os, ' /' );
-		}
+		// Pre-build sections as label-value arrays then render in a
+		// loop so empty-value rows can be skipped uniformly.
+		$user_pairs = array_filter( [
+			__( 'Username',    'wp-login-activity' ) => $user ? $user->user_login : ( $row->identifier !== '' ? $row->identifier : '' ),
+			__( 'Display name','wp-login-activity' ) => $user ? $display : '',
+			__( 'Role',        'wp-login-activity' ) => $row->get_role_label(),
+			__( 'Performed by','wp-login-activity' ) => $row->get_actor_display_name(),
+		], static fn( $v ) => $v !== '' );
 
-		if ( $row->user_agent !== '' ) {
-			$pairs[ __( 'User-Agent (raw)', 'wp-login-activity' ) ] = $row->user_agent;
-		}
+		$where_pairs = array_filter( [
+			__( 'IP address',     'wp-login-activity' ) => $row->ip_address,
+			__( 'Anonymised IP',  'wp-login-activity' ) => $row->get_anonymised_ip(),
+			__( 'Country',        'wp-login-activity' ) => $row->country_code,
+			__( 'Country source', 'wp-login-activity' ) => $row->country_source,
+		], static fn( $v ) => $v !== '' );
 
-		if ( $row->referer !== '' ) {
-			$pairs[ __( 'Referer', 'wp-login-activity' ) ] = $row->referer;
-		}
+		$how_pairs = array_filter( [
+			__( 'Browser',  'wp-login-activity' ) => $row->get_browser(),
+			__( 'OS',       'wp-login-activity' ) => $row->get_os(),
+			__( 'Device',   'wp-login-activity' ) => $row->get_device_type(),
+			__( 'Language', 'wp-login-activity' ) => $row->get_primary_language(),
+			__( 'Referer',  'wp-login-activity' ) => $row->referer,
+		], static fn( $v ) => $v !== '' );
 
-		if ( $row->accept_language !== '' ) {
-			$pairs[ __( 'Accept-Language', 'wp-login-activity' ) ] = $row->accept_language;
-		}
+		$raw_pairs = array_filter( [
+			__( 'Identifier (typed)',  'wp-login-activity' ) => $row->identifier,
+			__( 'Accept-Language',     'wp-login-activity' ) => $row->accept_language,
+			__( 'User-Agent',          'wp-login-activity' ) => $row->user_agent,
+			__( 'UUID',                'wp-login-activity' ) => $row->uuid,
+		], static fn( $v ) => $v !== '' );
 
-		if ( $row->has_distinct_actor() ) {
-			$pairs[ __( 'Performed by', 'wp-login-activity' ) ] = $row->get_actor_display_name();
-		}
+		$ts        = strtotime( $row->date_created . ' UTC' );
+		$date_disp = $ts
+			? sprintf(
+				/* translators: 1: date, 2: time */
+				esc_html__( '%1$s at %2$s', 'wp-login-activity' ),
+				esc_html( wp_date( __( 'Y/m/d', 'wp-login-activity' ), $ts ) ),
+				esc_html( wp_date( __( 'g:i a', 'wp-login-activity' ), $ts ) )
+			)
+			: esc_html( $row->date_created );
 
-		if ( $row->is_current_session() ) {
-			$pairs[ __( 'Session', 'wp-login-activity' ) ] = __( 'This is your current session.', 'wp-login-activity' );
-		}
-
-		$pairs[ __( 'UUID', 'wp-login-activity' ) ] = $row->uuid !== '' ? $row->uuid : '—';
-
-		/**
-		 * Filter the detail-row key/value pairs.
-		 *
-		 * Plugins extending the activity log with their own metadata
-		 * (custom row columns, third-party enrichment) can append to
-		 * the pairs array to surface that data inside the expanded
-		 * detail view. Both keys and values are escaped at render
-		 * time so plain strings are safe to add.
-		 *
-		 * @since 2.0.0
-		 *
-		 * @param array<string, string> $pairs Label => value.
-		 * @param ActivityRow           $row   Row context.
-		 */
-		$pairs = (array) apply_filters( 'wp_login_activity_detail_pairs', $pairs, $row );
+		[ $bg, $fg ] = $this->event_colours( $row->event_type );
 
 		?>
-		<tr id="wpla-detail-<?php echo (int) $row->id; ?>" class="wpla-detail-row" hidden>
-			<td colspan="<?php echo (int) $column_count; ?>" style="background:#f6f7f7;padding:14px 18px;">
-				<dl style="margin:0;display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:13px;">
-					<?php foreach ( $pairs as $label => $value ) : ?>
-						<dt style="font-weight:600;color:#50575e;"><?php echo esc_html( (string) $label ); ?></dt>
-						<dd style="margin:0;word-break:break-all;"><?php echo esc_html( (string) $value ); ?></dd>
-					<?php endforeach; ?>
-				</dl>
-			</td>
-		</tr>
+		<header class="wpla-flyout__header">
+			<?php if ( $avatar !== '' ) : ?>
+				<span class="wpla-flyout__avatar"><?php echo $avatar; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
+			<?php endif; ?>
+			<div>
+				<span style="display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;background:<?php echo esc_attr( $bg ); ?>;color:<?php echo esc_attr( $fg ); ?>;">
+					<?php echo esc_html( $this->event_label( $row->event_type ) ); ?>
+				</span>
+				<?php if ( $row->is_current_session() ) : ?>
+					<span style="margin-left:6px;display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:#e0ecfb;color:#1d4ed8;">
+						<?php esc_html_e( 'CURRENT SESSION', 'wp-login-activity' ); ?>
+					</span>
+				<?php endif; ?>
+				<h2 style="margin:6px 0 0;font-size:18px;line-height:1.3;">
+					<?php echo esc_html( $display ); ?>
+				</h2>
+				<div style="color:#646970;font-size:13px;margin-top:2px;"><?php echo $date_disp; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></div>
+			</div>
+		</header>
+
+		<div class="wpla-flyout__body">
+			<?php $this->render_flyout_section( __( 'User',  'wp-login-activity' ), $user_pairs ); ?>
+			<?php $this->render_flyout_section( __( 'Where', 'wp-login-activity' ), $where_pairs ); ?>
+			<?php $this->render_flyout_section( __( 'How',   'wp-login-activity' ), $how_pairs ); ?>
+			<?php $this->render_flyout_section( __( 'Raw',   'wp-login-activity' ), $raw_pairs ); ?>
+		</div>
+
+		<footer class="wpla-flyout__footer">
+			<?php if ( $filter_user_url !== '' ) : ?>
+				<a href="<?php echo esc_url( $filter_user_url ); ?>" class="button"><?php esc_html_e( 'Filter by user', 'wp-login-activity' ); ?></a>
+			<?php endif; ?>
+			<?php if ( $filter_ip_url !== '' ) : ?>
+				<a href="<?php echo esc_url( $filter_ip_url ); ?>" class="button"><?php esc_html_e( 'Filter by IP', 'wp-login-activity' ); ?></a>
+			<?php endif; ?>
+			<?php if ( $ipinfo_url !== '' ) : ?>
+				<a href="<?php echo esc_url( $ipinfo_url ); ?>" class="button" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'IPInfo.io ↗', 'wp-login-activity' ); ?></a>
+			<?php endif; ?>
+			<a href="<?php echo esc_url( $delete_url ); ?>" class="button button-link-delete" style="margin-left:auto;"><?php esc_html_e( 'Delete', 'wp-login-activity' ); ?></a>
+		</footer>
+		<?php
+	}
+
+	/**
+	 * Render one section of the flyout body.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string                $title Section heading.
+	 * @param array<string, string> $pairs Label => value (already filtered).
+	 *
+	 * @return void
+	 */
+	private function render_flyout_section( string $title, array $pairs ): void {
+		if ( empty( $pairs ) ) {
+			return;
+		}
+
+		?>
+		<section class="wpla-flyout__section">
+			<h3><?php echo esc_html( $title ); ?></h3>
+			<dl>
+				<?php foreach ( $pairs as $label => $value ) : ?>
+					<dt><?php echo esc_html( (string) $label ); ?></dt>
+					<dd><?php echo esc_html( (string) $value ); ?></dd>
+				<?php endforeach; ?>
+			</dl>
+		</section>
+		<?php
+	}
+
+	/**
+	 * Render the empty flyout shell + backdrop. JS populates the
+	 * body and toggles the `is-open` class on click.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return void
+	 */
+	private function render_flyout_shell(): void {
+		?>
+		<div class="wpla-flyout-backdrop" hidden></div>
+		<aside class="wpla-flyout" role="dialog" aria-labelledby="wpla-flyout-title" aria-hidden="true" hidden>
+			<button type="button" class="wpla-flyout__close" aria-label="<?php esc_attr_e( 'Close', 'wp-login-activity' ); ?>">×</button>
+			<div class="wpla-flyout__content"></div>
+		</aside>
 		<?php
 	}
 

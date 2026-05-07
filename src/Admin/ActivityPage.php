@@ -357,6 +357,7 @@ class ActivityPage {
 			</form>
 		</div>
 
+		<?php $this->list_table->render_flyout_payload(); ?>
 		<?php $this->print_inline_assets(); ?>
 		<?php
 	}
@@ -376,11 +377,10 @@ class ActivityPage {
 	private function print_inline_assets(): void {
 		?>
 		<style>
-			/* Override WP's automatic position-based striping
-			   (.striped > tbody > :nth-child(odd)) — the injected
-			   .wpla-detail-row siblings throw the parity off, so we
-			   apply zebra class manually in PHP and override WP's
-			   selector here. */
+			/* Manual zebra striping. WP's `.striped` uses
+			   :nth-child(odd) which we override here to hand
+			   striping to the wpla-alt class — avoids parity issues
+			   if anything ever injects siblings between data rows. */
 			.wp-list-table.striped > tbody > :nth-child(odd) {
 				background-color: transparent;
 			}
@@ -390,8 +390,111 @@ class ActivityPage {
 
 			.wpla-current-session > td { background: #f0f6ff !important; }
 			.wpla-current-session > td:first-child { box-shadow: inset 3px 0 0 0 #2271b1; }
-			.wpla-detail-row > td { border-top: 0 !important; }
 			.wpla-toggle-details { cursor: pointer; }
+
+			/* Flyout panel — slides in from the right of the viewport
+			   when "View details" is clicked. Backdrop fades over
+			   the content underneath, panel itself has a soft drop
+			   shadow + comfortable padding. */
+			.wpla-flyout-backdrop {
+				position: fixed;
+				inset: 0;
+				background: rgba(0, 0, 0, 0.35);
+				z-index: 99999;
+				opacity: 0;
+				transition: opacity 200ms ease;
+				pointer-events: none;
+			}
+			.wpla-flyout-backdrop.is-open {
+				opacity: 1;
+				pointer-events: auto;
+			}
+			.wpla-flyout {
+				position: fixed;
+				top: 0;
+				right: 0;
+				bottom: 0;
+				width: 100%;
+				max-width: 480px;
+				background: #fff;
+				z-index: 100000;
+				box-shadow: -4px 0 18px rgba(0, 0, 0, 0.18);
+				transform: translateX(100%);
+				transition: transform 240ms cubic-bezier(.22,.61,.36,1);
+				display: flex;
+				flex-direction: column;
+				overflow: hidden;
+			}
+			.wpla-flyout.is-open {
+				transform: translateX(0);
+			}
+			.wpla-flyout__close {
+				position: absolute;
+				top: 8px;
+				right: 12px;
+				background: transparent;
+				border: 0;
+				font-size: 26px;
+				line-height: 1;
+				color: #50575e;
+				cursor: pointer;
+				padding: 4px 10px;
+				border-radius: 3px;
+			}
+			.wpla-flyout__close:hover {
+				background: #f0f0f1;
+				color: #1d2327;
+			}
+			.wpla-flyout__header {
+				padding: 22px 24px 18px;
+				border-bottom: 1px solid #f0f0f1;
+				display: flex;
+				gap: 14px;
+				align-items: flex-start;
+			}
+			.wpla-flyout__avatar img {
+				border-radius: 50%;
+			}
+			.wpla-flyout__body {
+				flex: 1;
+				overflow-y: auto;
+				padding: 16px 24px;
+			}
+			.wpla-flyout__section {
+				margin-bottom: 22px;
+			}
+			.wpla-flyout__section h3 {
+				font-size: 11px;
+				text-transform: uppercase;
+				letter-spacing: .5px;
+				color: #646970;
+				margin: 0 0 8px;
+				font-weight: 600;
+			}
+			.wpla-flyout__section dl {
+				margin: 0;
+				display: grid;
+				grid-template-columns: max-content 1fr;
+				gap: 4px 14px;
+				font-size: 13px;
+			}
+			.wpla-flyout__section dt {
+				font-weight: 600;
+				color: #50575e;
+			}
+			.wpla-flyout__section dd {
+				margin: 0;
+				word-break: break-word;
+				color: #1d2327;
+			}
+			.wpla-flyout__footer {
+				padding: 14px 24px;
+				border-top: 1px solid #f0f0f1;
+				display: flex;
+				gap: 8px;
+				align-items: center;
+				background: #fafafb;
+			}
 
 			/* IP cell external-lookup dropdown. Position relative
 			   on the wrapper, absolute on the menu so it floats
@@ -445,7 +548,57 @@ class ActivityPage {
 		</style>
 		<script>
 			( function () {
-				// Detail-row toggle for the View-details row action.
+				var flyout      = document.querySelector( '.wpla-flyout' );
+				var backdrop    = document.querySelector( '.wpla-flyout-backdrop' );
+				var flyoutBody  = flyout ? flyout.querySelector( '.wpla-flyout__content' ) : null;
+
+				/**
+				 * Open the flyout populated with the detail template
+				 * for the given row id.
+				 */
+				function openFlyout( rowId ) {
+					if ( ! flyout || ! backdrop || ! flyoutBody ) {
+						return;
+					}
+					var template = document.getElementById( 'wpla-detail-' + rowId );
+					if ( ! template || ! template.content ) {
+						return;
+					}
+					flyoutBody.innerHTML = '';
+					flyoutBody.appendChild( template.content.cloneNode( true ) );
+
+					backdrop.removeAttribute( 'hidden' );
+					flyout.removeAttribute( 'hidden' );
+					// Force reflow so the transition triggers off the
+					// `is-open` class addition rather than coinciding
+					// with the hidden-attribute removal.
+					void flyout.offsetWidth;
+					backdrop.classList.add( 'is-open' );
+					flyout.classList.add( 'is-open' );
+					flyout.setAttribute( 'aria-hidden', 'false' );
+					document.body.style.overflow = 'hidden';
+				}
+
+				function closeFlyout() {
+					if ( ! flyout || ! backdrop ) {
+						return;
+					}
+					backdrop.classList.remove( 'is-open' );
+					flyout.classList.remove( 'is-open' );
+					flyout.setAttribute( 'aria-hidden', 'true' );
+					document.body.style.overflow = '';
+					// Hide after the transition so screen readers
+					// don't traverse a positionally-offscreen panel.
+					setTimeout( function () {
+						if ( ! flyout.classList.contains( 'is-open' ) ) {
+							flyout.setAttribute( 'hidden', '' );
+							backdrop.setAttribute( 'hidden', '' );
+						}
+					}, 260 );
+				}
+
+				// "View details" row action — open the flyout for
+				// the matching row.
 				document.addEventListener( 'click', function ( e ) {
 					var trigger = e.target.closest( '.wpla-toggle-details' );
 					if ( ! trigger ) {
@@ -453,26 +606,29 @@ class ActivityPage {
 					}
 					e.preventDefault();
 					var rowId = trigger.getAttribute( 'data-row-id' );
-					if ( ! rowId ) {
-						return;
-					}
-					var detail = document.getElementById( 'wpla-detail-' + rowId );
-					if ( ! detail ) {
-						return;
-					}
-					var isHidden = detail.hasAttribute( 'hidden' );
-					if ( isHidden ) {
-						detail.removeAttribute( 'hidden' );
-						trigger.setAttribute( 'aria-expanded', 'true' );
-					} else {
-						detail.setAttribute( 'hidden', '' );
-						trigger.setAttribute( 'aria-expanded', 'false' );
+					if ( rowId ) {
+						openFlyout( rowId );
 					}
 				} );
 
-				// IP-cell external-lookup dropdown toggle. One open
-				// at a time — clicking another trigger closes any
-				// menu that's already open. Click outside closes.
+				// Close handlers — backdrop click, close button, ESC.
+				if ( backdrop ) {
+					backdrop.addEventListener( 'click', closeFlyout );
+				}
+				document.addEventListener( 'click', function ( e ) {
+					if ( e.target.closest( '.wpla-flyout__close' ) ) {
+						closeFlyout();
+					}
+				} );
+				document.addEventListener( 'keydown', function ( e ) {
+					if ( e.key === 'Escape' ) {
+						closeFlyout();
+						closeAllIpMenus();
+					}
+				} );
+
+				// IP-cell external-lookup dropdown — one menu open at
+				// a time, click outside closes.
 				function closeAllIpMenus() {
 					document.querySelectorAll( '.wpla-ip-tools-menu' ).forEach( function ( menu ) {
 						menu.setAttribute( 'hidden', '' );
@@ -481,10 +637,8 @@ class ActivityPage {
 						btn.setAttribute( 'aria-expanded', 'false' );
 					} );
 				}
-
 				document.addEventListener( 'click', function ( e ) {
 					var trigger = e.target.closest( '.wpla-ip-tools-trigger' );
-
 					if ( trigger ) {
 						e.preventDefault();
 						var menu = trigger.parentElement.querySelector( '.wpla-ip-tools-menu' );
@@ -499,17 +653,7 @@ class ActivityPage {
 						}
 						return;
 					}
-
-					// Click anywhere else (and not inside an open menu)
-					// closes any open menu.
 					if ( ! e.target.closest( '.wpla-ip-tools-menu' ) ) {
-						closeAllIpMenus();
-					}
-				} );
-
-				// ESC closes any open dropdown.
-				document.addEventListener( 'keydown', function ( e ) {
-					if ( e.key === 'Escape' ) {
 						closeAllIpMenus();
 					}
 				} );
