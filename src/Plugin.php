@@ -112,12 +112,13 @@ final class Plugin {
 		( new ActivityTable() )->install();
 
 		$defaults = [
-			'wp_login_activity_retention_days'      => 90,
-			'wp_login_activity_notify_new_location' => 1,
-			'wp_login_activity_notify_recipient'    => 'user',
-			'wp_login_activity_log_failed_logins'   => 1,
-			'wp_login_activity_log_logouts'         => 1,
-			'wp_login_activity_log_registrations'   => 1,
+			'wp_login_activity_retention_days'       => 90,
+			'wp_login_activity_notify_new_location'  => 1,
+			'wp_login_activity_notify_recipient'     => 'user',
+			'wp_login_activity_log_failed_logins'    => 1,
+			'wp_login_activity_log_logouts'          => 1,
+			'wp_login_activity_log_registrations'    => 1,
+			'wp_login_activity_log_password_changes' => 1,
 		];
 
 		foreach ( $defaults as $option => $value ) {

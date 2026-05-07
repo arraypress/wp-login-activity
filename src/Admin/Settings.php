@@ -69,12 +69,13 @@ class Settings {
 	 */
 	public function register_settings(): void {
 		$options = [
-			'wp_login_activity_retention_days'      => 'absint',
-			'wp_login_activity_notify_new_location' => 'absint',
-			'wp_login_activity_notify_recipient'    => [ $this, 'sanitize_recipient' ],
-			'wp_login_activity_log_failed_logins'   => 'absint',
-			'wp_login_activity_log_logouts'         => 'absint',
-			'wp_login_activity_log_registrations'   => 'absint',
+			'wp_login_activity_retention_days'         => 'absint',
+			'wp_login_activity_notify_new_location'    => 'absint',
+			'wp_login_activity_notify_recipient'       => [ $this, 'sanitize_recipient' ],
+			'wp_login_activity_log_failed_logins'      => 'absint',
+			'wp_login_activity_log_logouts'            => 'absint',
+			'wp_login_activity_log_registrations'      => 'absint',
+			'wp_login_activity_log_password_changes'   => 'absint',
 		];
 
 		foreach ( $options as $option => $sanitizer ) {
@@ -111,12 +112,13 @@ class Settings {
 			return;
 		}
 
-		$retention = (int) get_option( 'wp_login_activity_retention_days', 90 );
-		$notify    = (int) get_option( 'wp_login_activity_notify_new_location', 1 );
-		$recipient = (string) get_option( 'wp_login_activity_notify_recipient', 'user' );
-		$failed    = (int) get_option( 'wp_login_activity_log_failed_logins', 1 );
-		$logouts   = (int) get_option( 'wp_login_activity_log_logouts', 1 );
-		$registers = (int) get_option( 'wp_login_activity_log_registrations', 1 );
+		$retention   = (int) get_option( 'wp_login_activity_retention_days', 90 );
+		$notify      = (int) get_option( 'wp_login_activity_notify_new_location', 1 );
+		$recipient   = (string) get_option( 'wp_login_activity_notify_recipient', 'user' );
+		$failed      = (int) get_option( 'wp_login_activity_log_failed_logins', 1 );
+		$logouts     = (int) get_option( 'wp_login_activity_log_logouts', 1 );
+		$registers   = (int) get_option( 'wp_login_activity_log_registrations', 1 );
+		$pwd_changes = (int) get_option( 'wp_login_activity_log_password_changes', 1 );
 
 		?>
 		<div class="wrap">
@@ -163,6 +165,10 @@ class Settings {
 									<label>
 										<input type="checkbox" name="wp_login_activity_log_registrations" value="1" <?php checked( $registers, 1 ); ?> />
 										<?php esc_html_e( 'New registrations', 'wp-login-activity' ); ?>
+									</label><br />
+									<label>
+										<input type="checkbox" name="wp_login_activity_log_password_changes" value="1" <?php checked( $pwd_changes, 1 ); ?> />
+										<?php esc_html_e( 'Password changes (profile edits + lost-password resets)', 'wp-login-activity' ); ?>
 									</label>
 								</fieldset>
 							</td>

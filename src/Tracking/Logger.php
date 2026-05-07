@@ -42,16 +42,24 @@ class Logger {
 	 * Constructor — wires WordPress hooks.
 	 *
 	 * Each hook handler is gated by an option so admins can disable
-	 * categories of events (failed logins, logouts, registrations)
-	 * without unloading the plugin.
+	 * categories of events (failed logins, logouts, registrations,
+	 * password changes) without unloading the plugin.
+	 *
+	 * Password-change detection runs on TWO hooks:
+	 *   - `profile_update` — admin/user changed their password on the
+	 *     edit-profile screen. Receives `$old_user_data` so we diff.
+	 *   - `password_reset` — user reset via the "lost password" flow.
+	 *     Always represents a password change, no diff needed.
 	 *
 	 * @since 2.0.0
 	 */
 	public function __construct() {
-		add_action( 'wp_login',         [ $this, 'on_login' ], 10, 2 );
-		add_action( 'wp_login_failed',  [ $this, 'on_login_failed' ], 10, 1 );
-		add_action( 'wp_logout',        [ $this, 'on_logout' ], 10, 1 );
-		add_action( 'user_register',    [ $this, 'on_user_register' ], 10, 1 );
+		add_action( 'wp_login',        [ $this, 'on_login' ], 10, 2 );
+		add_action( 'wp_login_failed', [ $this, 'on_login_failed' ], 10, 1 );
+		add_action( 'wp_logout',       [ $this, 'on_logout' ], 10, 1 );
+		add_action( 'user_register',   [ $this, 'on_user_register' ], 10, 1 );
+		add_action( 'profile_update',  [ $this, 'on_profile_update' ], 10, 2 );
+		add_action( 'password_reset',  [ $this, 'on_password_reset' ], 10, 1 );
 	}
 
 	/**
@@ -135,6 +143,68 @@ class Logger {
 	}
 
 	/**
+	 * Profile updated — log only when the password actually changed.
+	 *
+	 * `profile_update` fires on every profile edit (display name,
+	 * bio, etc.), so we diff `user_pass` against `$old_user_data`
+	 * to avoid log spam on cosmetic edits. The hashed-password
+	 * strings change byte-for-byte even when the plaintext is the
+	 * same (different bcrypt salt) — so a literal `!==` comparison
+	 * is the right test.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param int      $user_id       The user that was updated.
+	 * @param \WP_User $old_user_data The user object pre-update.
+	 *
+	 * @return void
+	 */
+	public function on_profile_update( int $user_id, $old_user_data ): void {
+		if ( ! get_option( 'wp_login_activity_log_password_changes', 1 ) ) {
+			return;
+		}
+
+		if ( ! is_object( $old_user_data ) || ! isset( $old_user_data->user_pass ) ) {
+			return;
+		}
+
+		$current = get_userdata( $user_id );
+		if ( ! $current || $current->user_pass === $old_user_data->user_pass ) {
+			return;
+		}
+
+		$this->record( 'password_changed', $user_id, (string) $current->user_login );
+	}
+
+	/**
+	 * Password reset via the lost-password flow.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param \WP_User|object $user The user whose password was reset.
+	 *
+	 * @return void
+	 */
+	public function on_password_reset( $user ): void {
+		if ( ! get_option( 'wp_login_activity_log_password_changes', 1 ) ) {
+			return;
+		}
+
+		if ( ! is_object( $user ) ) {
+			return;
+		}
+
+		$user_id    = isset( $user->ID ) ? (int) $user->ID : 0;
+		$identifier = isset( $user->user_login ) ? (string) $user->user_login : '';
+
+		if ( $user_id <= 0 ) {
+			return;
+		}
+
+		$this->record( 'password_changed', $user_id, $identifier );
+	}
+
+	/**
 	 * Insert a row + fire the post-insert action.
 	 *
 	 * @since 2.0.0
@@ -189,13 +259,24 @@ class Logger {
 	/**
 	 * Get the visitor's IP address.
 	 *
-	 * Delegates to wp-ip-utils, which already implements the
-	 * CF-Connecting-IP / X-Forwarded-For / X-Real-IP / REMOTE_ADDR
-	 * cascade and does the filter_var validation we'd otherwise
-	 * inline. Returns an empty string when nothing resolves.
+	 * Two-step resolution:
 	 *
-	 * Filterable via `wp_login_activity_visitor_ip` for sites with an
-	 * unusual proxy chain.
+	 *   1. Strict pass via wp-ip-utils `IP::get()` — handles the
+	 *      CF-Connecting-IP / X-Forwarded-For / X-Real-IP / REMOTE_ADDR
+	 *      cascade AND rejects private/loopback addresses (defence
+	 *      against a misconfigured proxy spoofing 127.0.0.1).
+	 *
+	 *   2. Permissive fallback when the strict pass returns null. This
+	 *      happens on local dev (loopback only), intranet deployments
+	 *      (RFC1918 ranges), and Docker containers (link-local). For
+	 *      a *login activity* tracker we genuinely want to capture
+	 *      these — "logged in from 192.168.1.50" is useful audit data.
+	 *      Walks the same header order, accepting any valid IP.
+	 *
+	 * Sites that want the strict behaviour back can short-circuit
+	 * step 2 by returning the original `$ip` from
+	 * `wp_login_activity_visitor_ip` regardless of context, or by
+	 * filtering `wp_login_activity_allow_private_ip` to false.
 	 *
 	 * @since 2.0.0
 	 *
@@ -204,7 +285,48 @@ class Logger {
 	private function resolve_ip(): string {
 		$ip = (string) ( IP::get() ?? '' );
 
+		if ( $ip === '' && apply_filters( 'wp_login_activity_allow_private_ip', true ) ) {
+			$ip = $this->resolve_private_ip_fallback();
+		}
+
 		return (string) apply_filters( 'wp_login_activity_visitor_ip', $ip );
+	}
+
+	/**
+	 * Permissive IP scan — accepts private + loopback addresses.
+	 *
+	 * Walks the same header priority as wp-ip-utils but skips the
+	 * `is_private()` rejection. Used only when the strict pass
+	 * returned nothing.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string Empty when no valid IP is present at all.
+	 */
+	private function resolve_private_ip_fallback(): string {
+		$candidates = [
+			'HTTP_CF_CONNECTING_IP',
+			'HTTP_X_REAL_IP',
+			'HTTP_CLIENT_IP',
+			'HTTP_X_FORWARDED_FOR',
+			'REMOTE_ADDR',
+		];
+
+		foreach ( $candidates as $header ) {
+			if ( empty( $_SERVER[ $header ] ) ) {
+				continue;
+			}
+
+			// X-Forwarded-For can be a comma-list — leftmost is the
+			// closest-to-client address.
+			$candidate = trim( explode( ',', (string) $_SERVER[ $header ] )[0] );
+
+			if ( filter_var( $candidate, FILTER_VALIDATE_IP ) ) {
+				return $candidate;
+			}
+		}
+
+		return '';
 	}
 
 	/**

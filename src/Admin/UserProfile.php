@@ -135,10 +135,11 @@ class UserProfile {
 	 */
 	private function event_label( string $event_type ): string {
 		$labels = [
-			'login'         => __( 'Login',         'wp-login-activity' ),
-			'login_failed'  => __( 'Failed login',  'wp-login-activity' ),
-			'logout'        => __( 'Logout',        'wp-login-activity' ),
-			'registered'    => __( 'Registered',    'wp-login-activity' ),
+			'login'             => __( 'Login',            'wp-login-activity' ),
+			'login_failed'      => __( 'Failed login',     'wp-login-activity' ),
+			'logout'            => __( 'Logout',           'wp-login-activity' ),
+			'registered'        => __( 'Registered',       'wp-login-activity' ),
+			'password_changed'  => __( 'Password changed', 'wp-login-activity' ),
 		];
 
 		return $labels[ $event_type ] ?? $event_type;

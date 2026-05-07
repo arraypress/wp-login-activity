@@ -137,6 +137,7 @@ class ActivityPage {
 		$paged      = max( 1, (int) ( $_GET['paged'] ?? 1 ) );
 		$event_type = isset( $_GET['event_type'] ) ? sanitize_key( (string) $_GET['event_type'] ) : '';
 		$user_id    = isset( $_GET['user_id'] ) ? absint( (string) $_GET['user_id'] ) : 0;
+		$search     = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['s'] ) ) : '';
 
 		$args = [
 			'number'  => self::PER_PAGE,
@@ -154,11 +155,21 @@ class ActivityPage {
 			$args['user_id'] = $user_id;
 		}
 
+		if ( $search !== '' ) {
+			// BerlinDB's `search` query var is matched against every
+			// column flagged `searchable: true` in the Schema — that's
+			// identifier, ip_address, country_code, event_type, user_id.
+			$args['search'] = $search;
+		}
+
 		return $args;
 	}
 
 	/**
-	 * Render the event-type filter dropdown.
+	 * Render the search box + event-type filter.
+	 *
+	 * Single GET form so search + filter combine into one URL — admins
+	 * can bookmark / share / link a "failed logins for IP X" view.
 	 *
 	 * @since 2.0.0
 	 *
@@ -167,23 +178,64 @@ class ActivityPage {
 	 * @return void
 	 */
 	private function render_filter_bar( array $args ): void {
-		$current = (string) ( $args['event_type'] ?? '' );
+		$current_event = (string) ( $args['event_type'] ?? '' );
+		$current_user  = (int)    ( $args['user_id']    ?? 0 );
+		$current_term  = (string) ( $args['search']     ?? '' );
 
 		?>
-		<form method="get" style="margin: 12px 0;">
+		<form method="get" class="wpla-filter-bar" style="margin:12px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
 			<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>" />
 
-			<select name="event_type">
-				<option value=""              <?php selected( $current, '' ); ?>><?php esc_html_e( 'All events',     'wp-login-activity' ); ?></option>
-				<option value="login"         <?php selected( $current, 'login' ); ?>><?php esc_html_e( 'Logins',         'wp-login-activity' ); ?></option>
-				<option value="login_failed"  <?php selected( $current, 'login_failed' ); ?>><?php esc_html_e( 'Failed logins',  'wp-login-activity' ); ?></option>
-				<option value="logout"        <?php selected( $current, 'logout' ); ?>><?php esc_html_e( 'Logouts',        'wp-login-activity' ); ?></option>
-				<option value="registered"    <?php selected( $current, 'registered' ); ?>><?php esc_html_e( 'Registrations',  'wp-login-activity' ); ?></option>
+			<?php if ( $current_user > 0 ) : ?>
+				<input type="hidden" name="user_id" value="<?php echo esc_attr( (string) $current_user ); ?>" />
+			<?php endif; ?>
+
+			<label for="wpla-search" class="screen-reader-text"><?php esc_html_e( 'Search', 'wp-login-activity' ); ?></label>
+			<input type="search"
+			       id="wpla-search"
+			       name="s"
+			       value="<?php echo esc_attr( $current_term ); ?>"
+			       placeholder="<?php esc_attr_e( 'Search by user, email, IP, or country…', 'wp-login-activity' ); ?>"
+			       class="regular-text" />
+
+			<label for="wpla-event-type" class="screen-reader-text"><?php esc_html_e( 'Event type', 'wp-login-activity' ); ?></label>
+			<select id="wpla-event-type" name="event_type">
+				<?php foreach ( $this->event_options() as $value => $label ) : ?>
+					<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $current_event, $value ); ?>>
+						<?php echo esc_html( $label ); ?>
+					</option>
+				<?php endforeach; ?>
 			</select>
 
 			<?php submit_button( __( 'Filter', 'wp-login-activity' ), '', '', false ); ?>
+
+			<?php if ( $current_term !== '' || $current_event !== '' || $current_user > 0 ) : ?>
+				<a href="<?php echo esc_url( admin_url( 'tools.php?page=' . self::PAGE_SLUG ) ); ?>" class="button button-secondary">
+					<?php esc_html_e( 'Reset', 'wp-login-activity' ); ?>
+				</a>
+			<?php endif; ?>
 		</form>
 		<?php
+	}
+
+	/**
+	 * Map of event slugs → admin-facing labels. Single source so the
+	 * filter dropdown, the table cell, and the Settings checklist
+	 * stay in sync as new event types are added.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return array<string, string>
+	 */
+	private function event_options(): array {
+		return [
+			''                  => __( 'All events',         'wp-login-activity' ),
+			'login'             => __( 'Logins',             'wp-login-activity' ),
+			'login_failed'      => __( 'Failed logins',      'wp-login-activity' ),
+			'logout'            => __( 'Logouts',            'wp-login-activity' ),
+			'registered'        => __( 'Registrations',      'wp-login-activity' ),
+			'password_changed'  => __( 'Password changes',   'wp-login-activity' ),
+		];
 	}
 
 	/**
@@ -242,10 +294,11 @@ class ActivityPage {
 	 */
 	private function event_label( string $event_type ): string {
 		$labels = [
-			'login'         => __( 'Login',          'wp-login-activity' ),
-			'login_failed'  => __( 'Failed login',   'wp-login-activity' ),
-			'logout'        => __( 'Logout',         'wp-login-activity' ),
-			'registered'    => __( 'Registered',     'wp-login-activity' ),
+			'login'             => __( 'Login',            'wp-login-activity' ),
+			'login_failed'      => __( 'Failed login',     'wp-login-activity' ),
+			'logout'            => __( 'Logout',           'wp-login-activity' ),
+			'registered'        => __( 'Registered',       'wp-login-activity' ),
+			'password_changed'  => __( 'Password changed', 'wp-login-activity' ),
 		];
 
 		return $labels[ $event_type ] ?? $event_type;
