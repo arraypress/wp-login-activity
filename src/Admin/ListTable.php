@@ -524,21 +524,10 @@ class ListTable extends WP_List_Table {
 			esc_html__( 'View details', 'wp-login-activity' )
 		);
 
-		if ( $row->user_id > 0 ) {
-			$actions['filter_user'] = sprintf(
-				'<a href="%s">%s</a>',
-				esc_url( add_query_arg( 'user_id', (int) $row->user_id, $base ) ),
-				esc_html__( 'Filter by user', 'wp-login-activity' )
-			);
-		}
-
-		if ( $row->ip_address !== '' ) {
-			$actions['filter_ip'] = sprintf(
-				'<a href="%s">%s</a>',
-				esc_url( add_query_arg( 's', $row->ip_address, $base ) ),
-				esc_html__( 'Filter by IP', 'wp-login-activity' )
-			);
-		}
+		// "Filter by user" + "Filter by IP" actions used to live here
+		// — superseded by direct click on the username + IP cells
+		// themselves (matches WP Users / Posts list-table convention
+		// where clicking the primary column drills in).
 
 		$delete_url = wp_nonce_url(
 			add_query_arg(
@@ -880,13 +869,23 @@ class ListTable extends WP_List_Table {
 	 * @return string
 	 */
 	public function column_username( ActivityRow $row ): string {
+		$base = admin_url( 'users.php?page=wp-login-activity' );
+
 		if ( $row->user_id > 0 ) {
 			$user = get_userdata( $row->user_id );
 			if ( $user ) {
-				$avatar = get_avatar( $row->user_id, 32 );
-				$link   = sprintf(
-					'<strong><a href="%s">%s</a></strong>',
-					esc_url( get_edit_user_link( $row->user_id ) ),
+				// Click filters the table by this user. WP Users
+				// list table convention is to link the username to
+				// edit-user, but in an audit-log surface "show me
+				// every event for this person" is the dominant
+				// workflow — edit-user is one row-action click away
+				// via the "Filter by user" alternative path.
+				$filter_url = add_query_arg( 'user_id', (int) $row->user_id, $base );
+				$avatar     = get_avatar( $row->user_id, 32 );
+				$link       = sprintf(
+					'<strong><a href="%s" title="%s">%s</a></strong>',
+					esc_url( $filter_url ),
+					esc_attr__( 'Filter the activity log by this user', 'wp-login-activity' ),
 					esc_html( (string) $user->user_login )
 				);
 
@@ -894,11 +893,22 @@ class ListTable extends WP_List_Table {
 			}
 		}
 
-		// Unresolved row — show the typed identifier in monospace.
-		// No avatar (we don't know the user) and no link.
-		return $row->identifier !== ''
-			? '<code>' . esc_html( $row->identifier ) . '</code>'
-			: '—';
+		// Unresolved row — show the typed identifier in monospace,
+		// linked to a search-filter so admins can see every failed
+		// attempt against the same string. No avatar (we don't know
+		// the user behind the typed value).
+		if ( $row->identifier !== '' ) {
+			$search_url = add_query_arg( 's', $row->identifier, $base );
+
+			return sprintf(
+				'<a href="%s" title="%s"><code>%s</code></a>',
+				esc_url( $search_url ),
+				esc_attr__( 'Filter the activity log by this identifier', 'wp-login-activity' ),
+				esc_html( $row->identifier )
+			);
+		}
+
+		return '—';
 	}
 
 	/**
@@ -1014,14 +1024,16 @@ class ListTable extends WP_List_Table {
 	}
 
 	/**
-	 * "IP" column. Renders the address as a link to ipinfo.io's
-	 * lookup page for that IP — admins investigating an event almost
-	 * always want full external intel (ASN, ISP, abuse history,
-	 * geographic precision) which a third-party service does better
-	 * than we ever could from a local table.
+	 * "IP" column.
 	 *
-	 * The "Filter by IP" row action stays available for the separate
-	 * "show me everything from this IP on this site" workflow.
+	 * Click the IP itself = filter the table by this IP (the dominant
+	 * "show me everything from this address" workflow). The small
+	 * kebab icon next to the IP opens a dropdown of external-lookup
+	 * services — IPInfo by default, plus whatever plugins register
+	 * via the `wp_login_activity_ip_lookup_services` filter
+	 * (AbuseIPDB, VirusTotal, Shodan, an internal reputation tool).
+	 * Splitting click vs dropdown keeps the common case one click
+	 * away while the rarer external intel stays discoverable.
 	 *
 	 * @since 2.0.0
 	 *
@@ -1034,30 +1046,100 @@ class ListTable extends WP_List_Table {
 			return '—';
 		}
 
+		$base       = admin_url( 'users.php?page=wp-login-activity' );
+		$filter_url = add_query_arg( 's', $row->ip_address, $base );
+
+		$ip_link = sprintf(
+			'<a href="%s" title="%s"><code>%s</code></a>',
+			esc_url( $filter_url ),
+			esc_attr__( 'Filter the activity log by this IP', 'wp-login-activity' ),
+			esc_html( $row->ip_address )
+		);
+
+		$services = $this->ip_lookup_services( $row->ip_address, $row );
+
+		if ( empty( $services ) ) {
+			return $ip_link;
+		}
+
+		// Vanilla-CSS dropdown — toggled via the inline JS in
+		// ActivityPage::print_inline_assets(). Aria attributes mirror
+		// WP core's Posts row-action menus.
+		ob_start();
+		?>
+		<span class="wpla-ip-tools">
+			<?php echo $ip_link; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+			<button type="button"
+			        class="wpla-ip-tools-trigger"
+			        aria-label="<?php esc_attr_e( 'External lookup services', 'wp-login-activity' ); ?>"
+			        aria-haspopup="true"
+			        aria-expanded="false"
+			        data-row-id="<?php echo (int) $row->id; ?>">⋯</button>
+			<span class="wpla-ip-tools-menu" role="menu" hidden>
+				<?php foreach ( $services as $service ) : ?>
+					<a href="<?php echo esc_url( (string) $service['url'] ); ?>"
+					   role="menuitem"
+					   target="_blank"
+					   rel="noopener noreferrer"><?php echo esc_html( (string) $service['label'] ); ?></a>
+				<?php endforeach; ?>
+			</span>
+		</span>
+		<?php
+		return (string) ob_get_clean();
+	}
+
+	/**
+	 * Build the external-lookup-service list for an IP.
+	 *
+	 * Default: IPInfo.io. Plugins extend by hooking
+	 * `wp_login_activity_ip_lookup_services`. The legacy
+	 * `wp_login_activity_ip_lookup_url` filter still works as a
+	 * back-compat shim that mutates the IPInfo entry.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string      $ip  The IP being looked up.
+	 * @param ActivityRow $row Row context.
+	 *
+	 * @return array<int, array{label:string,url:string}>
+	 */
+	private function ip_lookup_services( string $ip, ActivityRow $row ): array {
+		$ipinfo_url = 'https://ipinfo.io/' . rawurlencode( $ip );
+
+		// Back-compat: the older `_ip_lookup_url` filter still wins
+		// over the default IPInfo URL if anyone's already hooked it.
+		$ipinfo_url = (string) apply_filters( 'wp_login_activity_ip_lookup_url', $ipinfo_url, $ip, $row );
+
+		$services = [
+			[
+				'label' => __( 'Check on IPInfo.io', 'wp-login-activity' ),
+				'url'   => $ipinfo_url,
+			],
+		];
+
 		/**
-		 * Filter the URL the IP cell links to. Allows swapping
-		 * IPInfo for a different reputation service (AbuseIPDB,
-		 * VirusTotal, Shodan, an internal tool) site-wide.
+		 * Filter the list of external IP-lookup services rendered
+		 * in the column dropdown.
+		 *
+		 * Each entry is `[ 'label' => string, 'url' => string ]`.
+		 * Plugins can append AbuseIPDB / VirusTotal / Shodan / etc.,
+		 * or remove services they don't want exposed.
 		 *
 		 * @since 2.0.0
 		 *
-		 * @param string      $url Default URL (https://ipinfo.io/{ip}).
-		 * @param string      $ip  The IP being looked up.
-		 * @param ActivityRow $row Row context.
+		 * @param array       $services Default list.
+		 * @param string      $ip       The IP being looked up.
+		 * @param ActivityRow $row      Row context.
 		 */
-		$lookup_url = apply_filters(
-			'wp_login_activity_ip_lookup_url',
-			'https://ipinfo.io/' . rawurlencode( $row->ip_address ),
-			$row->ip_address,
-			$row
-		);
+		$services = (array) apply_filters( 'wp_login_activity_ip_lookup_services', $services, $ip, $row );
 
-		return sprintf(
-			'<a href="%s" target="_blank" rel="noopener noreferrer" title="%s"><code>%s</code></a>',
-			esc_url( $lookup_url ),
-			esc_attr__( 'Look up this IP on IPInfo.io', 'wp-login-activity' ),
-			esc_html( $row->ip_address )
-		);
+		// Defensive shape validation — drop any entry missing label
+		// or URL so a misconfigured filter doesn't render <a> with
+		// empty href.
+		return array_values( array_filter(
+			$services,
+			static fn( $svc ) => is_array( $svc ) && ! empty( $svc['label'] ) && ! empty( $svc['url'] )
+		) );
 	}
 
 	/**

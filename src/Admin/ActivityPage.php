@@ -319,31 +319,128 @@ class ActivityPage {
 			.wpla-current-session > td:first-child { box-shadow: inset 3px 0 0 0 #2271b1; }
 			.wpla-detail-row > td { border-top: 0 !important; }
 			.wpla-toggle-details { cursor: pointer; }
+
+			/* IP cell external-lookup dropdown. Position relative
+			   on the wrapper, absolute on the menu so it floats
+			   over adjacent rows without expanding the cell height. */
+			.wpla-ip-tools {
+				display: inline-flex;
+				align-items: center;
+				gap: 4px;
+				position: relative;
+			}
+			.wpla-ip-tools-trigger {
+				background: transparent;
+				border: 1px solid #c3c4c7;
+				border-radius: 3px;
+				color: #50575e;
+				cursor: pointer;
+				font-size: 13px;
+				line-height: 1;
+				padding: 1px 6px;
+				min-height: 20px;
+			}
+			.wpla-ip-tools-trigger:hover,
+			.wpla-ip-tools-trigger[aria-expanded="true"] {
+				background: #f0f0f1;
+				border-color: #8c8f94;
+			}
+			.wpla-ip-tools-menu {
+				position: absolute;
+				top: calc(100% + 4px);
+				left: 0;
+				min-width: 180px;
+				background: #fff;
+				border: 1px solid #c3c4c7;
+				border-radius: 3px;
+				box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+				padding: 4px 0;
+				z-index: 100;
+			}
+			.wpla-ip-tools-menu a {
+				display: block;
+				padding: 6px 12px;
+				color: #2271b1;
+				text-decoration: none;
+				font-size: 13px;
+				white-space: nowrap;
+			}
+			.wpla-ip-tools-menu a:hover {
+				background: #f0f6ff;
+				color: #135e96;
+			}
 		</style>
 		<script>
-			document.addEventListener( 'click', function ( e ) {
-				var trigger = e.target.closest( '.wpla-toggle-details' );
-				if ( ! trigger ) {
-					return;
+			( function () {
+				// Detail-row toggle for the View-details row action.
+				document.addEventListener( 'click', function ( e ) {
+					var trigger = e.target.closest( '.wpla-toggle-details' );
+					if ( ! trigger ) {
+						return;
+					}
+					e.preventDefault();
+					var rowId = trigger.getAttribute( 'data-row-id' );
+					if ( ! rowId ) {
+						return;
+					}
+					var detail = document.getElementById( 'wpla-detail-' + rowId );
+					if ( ! detail ) {
+						return;
+					}
+					var isHidden = detail.hasAttribute( 'hidden' );
+					if ( isHidden ) {
+						detail.removeAttribute( 'hidden' );
+						trigger.setAttribute( 'aria-expanded', 'true' );
+					} else {
+						detail.setAttribute( 'hidden', '' );
+						trigger.setAttribute( 'aria-expanded', 'false' );
+					}
+				} );
+
+				// IP-cell external-lookup dropdown toggle. One open
+				// at a time — clicking another trigger closes any
+				// menu that's already open. Click outside closes.
+				function closeAllIpMenus() {
+					document.querySelectorAll( '.wpla-ip-tools-menu' ).forEach( function ( menu ) {
+						menu.setAttribute( 'hidden', '' );
+					} );
+					document.querySelectorAll( '.wpla-ip-tools-trigger' ).forEach( function ( btn ) {
+						btn.setAttribute( 'aria-expanded', 'false' );
+					} );
 				}
-				e.preventDefault();
-				var rowId = trigger.getAttribute( 'data-row-id' );
-				if ( ! rowId ) {
-					return;
-				}
-				var detail = document.getElementById( 'wpla-detail-' + rowId );
-				if ( ! detail ) {
-					return;
-				}
-				var isHidden = detail.hasAttribute( 'hidden' );
-				if ( isHidden ) {
-					detail.removeAttribute( 'hidden' );
-					trigger.setAttribute( 'aria-expanded', 'true' );
-				} else {
-					detail.setAttribute( 'hidden', '' );
-					trigger.setAttribute( 'aria-expanded', 'false' );
-				}
-			} );
+
+				document.addEventListener( 'click', function ( e ) {
+					var trigger = e.target.closest( '.wpla-ip-tools-trigger' );
+
+					if ( trigger ) {
+						e.preventDefault();
+						var menu = trigger.parentElement.querySelector( '.wpla-ip-tools-menu' );
+						if ( ! menu ) {
+							return;
+						}
+						var willOpen = menu.hasAttribute( 'hidden' );
+						closeAllIpMenus();
+						if ( willOpen ) {
+							menu.removeAttribute( 'hidden' );
+							trigger.setAttribute( 'aria-expanded', 'true' );
+						}
+						return;
+					}
+
+					// Click anywhere else (and not inside an open menu)
+					// closes any open menu.
+					if ( ! e.target.closest( '.wpla-ip-tools-menu' ) ) {
+						closeAllIpMenus();
+					}
+				} );
+
+				// ESC closes any open dropdown.
+				document.addEventListener( 'keydown', function ( e ) {
+					if ( e.key === 'Escape' ) {
+						closeAllIpMenus();
+					}
+				} );
+			} )();
 		</script>
 		<?php
 	}
