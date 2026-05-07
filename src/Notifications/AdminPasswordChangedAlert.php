@@ -106,8 +106,8 @@ class AdminPasswordChangedAlert {
 		return sprintf(
 			/* translators: 1: admin username, 2: site name */
 			__( '[%2$s] Admin password changed for %1$s', 'wp-login-activity' ),
-			$row->get_display_name(),
-			$site_name
+			sanitize_text_field( $row->get_display_name() ),
+			sanitize_text_field( $site_name )
 		);
 	}
 

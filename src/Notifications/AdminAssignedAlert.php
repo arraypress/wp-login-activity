@@ -115,11 +115,13 @@ class AdminAssignedAlert {
 	private function build_subject( ActivityRow $row ): string {
 		$site_name = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
 
+		// sanitize_text_field strips newlines from upstream-tainted
+		// strings so they can't inject mail headers in the Subject.
 		return sprintf(
 			/* translators: 1: username assigned the admin role, 2: site name */
 			__( '[%2$s] Administrator role assigned to %1$s', 'wp-login-activity' ),
-			$row->get_display_name(),
-			$site_name
+			sanitize_text_field( $row->get_display_name() ),
+			sanitize_text_field( $site_name )
 		);
 	}
 

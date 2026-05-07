@@ -147,13 +147,17 @@ class FailedLoginBurstAlert {
 	private function build_subject( string $identifier, int $count, int $window ): string {
 		$site_name = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
 
+		// `$identifier` came from the visitor's typed login form input
+		// — attacker-controlled. Strip newlines + tags via
+		// sanitize_text_field so it can't inject extra mail headers
+		// (Bcc:, From:, etc.) into the Subject line.
 		return sprintf(
 			/* translators: 1: count, 2: identifier, 3: window minutes, 4: site */
 			__( '[%4$s] %1$d failed login attempts on "%2$s" in %3$d minutes', 'wp-login-activity' ),
 			$count,
-			$identifier,
+			sanitize_text_field( $identifier ),
 			$window,
-			$site_name
+			sanitize_text_field( $site_name )
 		);
 	}
 

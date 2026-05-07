@@ -102,8 +102,8 @@ class AdminEmailChangedAlert {
 		return sprintf(
 			/* translators: 1: admin display name, 2: site name */
 			__( '[%2$s] Admin email address changed for %1$s', 'wp-login-activity' ),
-			$display,
-			$site_name
+			sanitize_text_field( $display ),
+			sanitize_text_field( $site_name )
 		);
 	}
 

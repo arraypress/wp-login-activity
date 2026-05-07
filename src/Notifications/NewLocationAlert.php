@@ -114,11 +114,14 @@ class NewLocationAlert {
 		$site_name = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
 		$country   = $row->country_code !== '' ? $row->country_code : 'Unknown';
 
+		// sanitize_text_field strips newlines + tags from any
+		// component that could be tainted upstream — defence-in-depth
+		// against email-header injection in the Subject line.
 		return sprintf(
 			/* translators: 1: country code, 2: site name */
 			__( '[%2$s] New login from %1$s', 'wp-login-activity' ),
-			$country,
-			$site_name
+			sanitize_text_field( $country ),
+			sanitize_text_field( $site_name )
 		);
 	}
 

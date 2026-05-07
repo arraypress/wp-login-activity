@@ -168,9 +168,14 @@ class Exporter {
 	private function stream_csv( array $args ): void {
 		nocache_headers();
 
+		// Filename includes UTC datetime + a short random token. The
+		// random suffix prevents collisions when two admins (or one
+		// admin in two tabs) export within the same second — bare
+		// gmdate('His') has 1-second resolution, easy to collide.
 		$filename = sprintf(
-			'login-activity-%s.csv',
-			gmdate( 'Y-m-d-His' )
+			'login-activity-%s-%s.csv',
+			gmdate( 'Y-m-d-His' ),
+			substr( wp_hash( uniqid( '', true ) ), 0, 8 )
 		);
 
 		header( 'Content-Type: text/csv; charset=utf-8' );
