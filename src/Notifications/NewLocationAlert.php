@@ -25,6 +25,7 @@ namespace ArrayPress\WP\LoginActivity\Notifications;
 defined( 'ABSPATH' ) || exit;
 
 use ArrayPress\WP\LoginActivity\Database\Rows\Activity as ActivityRow;
+use ArrayPress\WP\LoginActivity\Notifications\Recipients;
 
 /**
  * Class NewLocationAlert
@@ -81,7 +82,7 @@ class NewLocationAlert {
 			return;
 		}
 
-		$recipients = $this->resolve_recipients( (string) $user->user_email );
+		$recipients = Recipients::for_user( (string) $user->user_email );
 		if ( empty( $recipients ) ) {
 			return;
 		}
@@ -93,35 +94,6 @@ class NewLocationAlert {
 		foreach ( $recipients as $to ) {
 			wp_mail( $to, $subject, $body, $headers );
 		}
-	}
-
-	/**
-	 * Build the recipient list per setting.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param string $user_email The logging-in user's email.
-	 *
-	 * @return string[]
-	 */
-	private function resolve_recipients( string $user_email ): array {
-		$mode = (string) get_option( 'wp_login_activity_notify_recipient', 'user' );
-
-		$recipients = [];
-
-		if ( in_array( $mode, [ 'user', 'both' ], true ) && $user_email !== '' ) {
-			$recipients[] = $user_email;
-		}
-
-		if ( in_array( $mode, [ 'admin', 'both' ], true ) ) {
-			$admin = (string) get_option( 'admin_email' );
-			if ( $admin !== '' ) {
-				$recipients[] = $admin;
-			}
-		}
-
-		// De-dupe so admin-as-user only gets one mail.
-		return array_values( array_unique( array_filter( $recipients ) ) );
 	}
 
 	/**

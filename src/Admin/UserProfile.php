@@ -116,7 +116,7 @@ class UserProfile {
 			</table>
 
 			<p>
-				<a href="<?php echo esc_url( admin_url( 'tools.php?page=wp-login-activity&user_id=' . (int) $user->ID ) ); ?>">
+				<a href="<?php echo esc_url( admin_url( 'users.php?page=wp-login-activity&user_id=' . (int) $user->ID ) ); ?>">
 					<?php esc_html_e( 'View full activity →', 'wp-login-activity' ); ?>
 				</a>
 			</p>
@@ -135,11 +135,12 @@ class UserProfile {
 	 */
 	private function event_label( string $event_type ): string {
 		$labels = [
-			'login'             => __( 'Login',            'wp-login-activity' ),
-			'login_failed'      => __( 'Failed login',     'wp-login-activity' ),
-			'logout'            => __( 'Logout',           'wp-login-activity' ),
-			'registered'        => __( 'Registered',       'wp-login-activity' ),
-			'password_changed'  => __( 'Password changed', 'wp-login-activity' ),
+			'login'             => __( 'Login',                  'wp-login-activity' ),
+			'login_failed'      => __( 'Failed login',           'wp-login-activity' ),
+			'logout'            => __( 'Logout',                 'wp-login-activity' ),
+			'registered'        => __( 'Registered',             'wp-login-activity' ),
+			'password_changed'  => __( 'Password changed',       'wp-login-activity' ),
+			'admin_assigned'    => __( 'Admin role assigned',    'wp-login-activity' ),
 		];
 
 		return $labels[ $event_type ] ?? $event_type;

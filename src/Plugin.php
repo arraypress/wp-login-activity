@@ -21,6 +21,8 @@ use ArrayPress\WP\LoginActivity\Database\Tables\Activity as ActivityTable;
 use ArrayPress\WP\LoginActivity\Tracking\Logger;
 use ArrayPress\WP\LoginActivity\Tracking\Cleanup;
 use ArrayPress\WP\LoginActivity\Notifications\NewLocationAlert;
+use ArrayPress\WP\LoginActivity\Notifications\AdminAssignedAlert;
+use ArrayPress\WP\LoginActivity\Notifications\AdminPasswordChangedAlert;
 
 /**
  * Class Plugin
@@ -79,9 +81,12 @@ final class Plugin {
 		// wp_logout / user_register and writes a row per event.
 		new Logger();
 
-		// 3. Email alert on new-country logins. Subscribes to the
-		// `wp_login_activity_logged` action emitted by Logger.
+		// 3. Notification listeners. Each subscribes to the
+		// `wp_login_activity_logged` action emitted by Logger and
+		// independently decides whether the row is worth an email.
 		new NewLocationAlert();
+		new AdminAssignedAlert();
+		new AdminPasswordChangedAlert();
 
 		// 4. Cron purge — expired rows get deleted daily.
 		new Cleanup();
@@ -112,13 +117,15 @@ final class Plugin {
 		( new ActivityTable() )->install();
 
 		$defaults = [
-			'wp_login_activity_retention_days'       => 90,
-			'wp_login_activity_notify_new_location'  => 1,
-			'wp_login_activity_notify_recipient'     => 'user',
-			'wp_login_activity_log_failed_logins'    => 1,
-			'wp_login_activity_log_logouts'          => 1,
-			'wp_login_activity_log_registrations'    => 1,
-			'wp_login_activity_log_password_changes' => 1,
+			'wp_login_activity_retention_days'              => 90,
+			'wp_login_activity_notify_new_location'         => 1,
+			'wp_login_activity_notify_admin_assigned'       => 1,
+			'wp_login_activity_notify_admin_password_changed' => 1,
+			'wp_login_activity_notify_recipient'            => 'user',
+			'wp_login_activity_log_failed_logins'           => 1,
+			'wp_login_activity_log_logouts'                 => 1,
+			'wp_login_activity_log_registrations'           => 1,
+			'wp_login_activity_log_password_changes'        => 1,
 		];
 
 		foreach ( $defaults as $option => $value ) {

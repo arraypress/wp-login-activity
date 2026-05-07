@@ -52,14 +52,18 @@ class ActivityPage {
 	}
 
 	/**
-	 * Add page under Tools → Login Activity.
+	 * Add page under Users → Login Activity.
+	 *
+	 * Lives under the Users menu rather than Tools because activity
+	 * IS user data — admins thinking about a user navigate to Users
+	 * first. Tools is a kitchen-sink menu for one-off site operations.
 	 *
 	 * @since 2.0.0
 	 *
 	 * @return void
 	 */
 	public function register_menu(): void {
-		add_management_page(
+		add_users_page(
 			__( 'Login Activity', 'wp-login-activity' ),
 			__( 'Login Activity', 'wp-login-activity' ),
 			'manage_options',
@@ -229,12 +233,13 @@ class ActivityPage {
 	 */
 	private function event_options(): array {
 		return [
-			''                  => __( 'All events',         'wp-login-activity' ),
-			'login'             => __( 'Logins',             'wp-login-activity' ),
-			'login_failed'      => __( 'Failed logins',      'wp-login-activity' ),
-			'logout'            => __( 'Logouts',            'wp-login-activity' ),
-			'registered'        => __( 'Registrations',      'wp-login-activity' ),
-			'password_changed'  => __( 'Password changes',   'wp-login-activity' ),
+			''                  => __( 'All events',          'wp-login-activity' ),
+			'login'             => __( 'Logins',              'wp-login-activity' ),
+			'login_failed'      => __( 'Failed logins',       'wp-login-activity' ),
+			'logout'            => __( 'Logouts',             'wp-login-activity' ),
+			'registered'        => __( 'Registrations',       'wp-login-activity' ),
+			'password_changed'  => __( 'Password changes',    'wp-login-activity' ),
+			'admin_assigned'    => __( 'Admin role assigned', 'wp-login-activity' ),
 		];
 	}
 
@@ -294,11 +299,12 @@ class ActivityPage {
 	 */
 	private function event_label( string $event_type ): string {
 		$labels = [
-			'login'             => __( 'Login',            'wp-login-activity' ),
-			'login_failed'      => __( 'Failed login',     'wp-login-activity' ),
-			'logout'            => __( 'Logout',           'wp-login-activity' ),
-			'registered'        => __( 'Registered',       'wp-login-activity' ),
-			'password_changed'  => __( 'Password changed', 'wp-login-activity' ),
+			'login'             => __( 'Login',                  'wp-login-activity' ),
+			'login_failed'      => __( 'Failed login',           'wp-login-activity' ),
+			'logout'            => __( 'Logout',                 'wp-login-activity' ),
+			'registered'        => __( 'Registered',             'wp-login-activity' ),
+			'password_changed'  => __( 'Password changed',       'wp-login-activity' ),
+			'admin_assigned'    => __( 'Admin role assigned',    'wp-login-activity' ),
 		];
 
 		return $labels[ $event_type ] ?? $event_type;

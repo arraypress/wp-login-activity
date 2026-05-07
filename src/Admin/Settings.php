@@ -69,13 +69,15 @@ class Settings {
 	 */
 	public function register_settings(): void {
 		$options = [
-			'wp_login_activity_retention_days'         => 'absint',
-			'wp_login_activity_notify_new_location'    => 'absint',
-			'wp_login_activity_notify_recipient'       => [ $this, 'sanitize_recipient' ],
-			'wp_login_activity_log_failed_logins'      => 'absint',
-			'wp_login_activity_log_logouts'            => 'absint',
-			'wp_login_activity_log_registrations'      => 'absint',
-			'wp_login_activity_log_password_changes'   => 'absint',
+			'wp_login_activity_retention_days'                => 'absint',
+			'wp_login_activity_notify_new_location'           => 'absint',
+			'wp_login_activity_notify_admin_assigned'         => 'absint',
+			'wp_login_activity_notify_admin_password_changed' => 'absint',
+			'wp_login_activity_notify_recipient'              => [ $this, 'sanitize_recipient' ],
+			'wp_login_activity_log_failed_logins'             => 'absint',
+			'wp_login_activity_log_logouts'                   => 'absint',
+			'wp_login_activity_log_registrations'             => 'absint',
+			'wp_login_activity_log_password_changes'          => 'absint',
 		];
 
 		foreach ( $options as $option => $sanitizer ) {
@@ -112,8 +114,10 @@ class Settings {
 			return;
 		}
 
-		$retention   = (int) get_option( 'wp_login_activity_retention_days', 90 );
-		$notify      = (int) get_option( 'wp_login_activity_notify_new_location', 1 );
+		$retention      = (int) get_option( 'wp_login_activity_retention_days', 90 );
+		$notify_country = (int) get_option( 'wp_login_activity_notify_new_location', 1 );
+		$notify_admin_assigned = (int) get_option( 'wp_login_activity_notify_admin_assigned', 1 );
+		$notify_admin_pwd      = (int) get_option( 'wp_login_activity_notify_admin_password_changed', 1 );
 		$recipient   = (string) get_option( 'wp_login_activity_notify_recipient', 'user' );
 		$failed      = (int) get_option( 'wp_login_activity_log_failed_logins', 1 );
 		$logouts     = (int) get_option( 'wp_login_activity_log_logouts', 1 );
@@ -175,18 +179,28 @@ class Settings {
 						</tr>
 
 						<tr>
-							<th scope="row"><?php esc_html_e( 'New-country email alert', 'wp-login-activity' ); ?></th>
+							<th scope="row"><?php esc_html_e( 'Email alerts', 'wp-login-activity' ); ?></th>
 							<td>
-								<label>
-									<input type="checkbox" name="wp_login_activity_notify_new_location" value="1" <?php checked( $notify, 1 ); ?> />
-									<?php esc_html_e( 'Email when a successful login arrives from a country never seen for that user before.', 'wp-login-activity' ); ?>
-								</label>
+								<fieldset>
+									<label>
+										<input type="checkbox" name="wp_login_activity_notify_new_location" value="1" <?php checked( $notify_country, 1 ); ?> />
+										<?php esc_html_e( 'Successful login from a country never seen for that user before.', 'wp-login-activity' ); ?>
+									</label><br />
+									<label>
+										<input type="checkbox" name="wp_login_activity_notify_admin_assigned" value="1" <?php checked( $notify_admin_assigned, 1 ); ?> />
+										<?php esc_html_e( 'Administrator role assigned (new admin user OR existing user promoted). Always emails the admin team — never the affected user.', 'wp-login-activity' ); ?>
+									</label><br />
+									<label>
+										<input type="checkbox" name="wp_login_activity_notify_admin_password_changed" value="1" <?php checked( $notify_admin_pwd, 1 ); ?> />
+										<?php esc_html_e( 'Password changed for any admin-capability account. Always emails OTHER admins — not the user whose password just changed.', 'wp-login-activity' ); ?>
+									</label>
+								</fieldset>
 							</td>
 						</tr>
 
 						<tr>
 							<th scope="row">
-								<label for="wp_login_activity_notify_recipient"><?php esc_html_e( 'Email recipient', 'wp-login-activity' ); ?></label>
+								<label for="wp_login_activity_notify_recipient"><?php esc_html_e( 'New-country recipient', 'wp-login-activity' ); ?></label>
 							</th>
 							<td>
 								<select id="wp_login_activity_notify_recipient" name="wp_login_activity_notify_recipient">
@@ -194,6 +208,9 @@ class Settings {
 									<option value="admin" <?php selected( $recipient, 'admin' ); ?>><?php esc_html_e( 'Site admin', 'wp-login-activity' ); ?></option>
 									<option value="both"  <?php selected( $recipient, 'both' ); ?>><?php esc_html_e( 'Both', 'wp-login-activity' ); ?></option>
 								</select>
+								<p class="description">
+									<?php esc_html_e( 'Applies only to the new-country alert. Admin-team alerts always go to administrators regardless of this setting.', 'wp-login-activity' ); ?>
+								</p>
 							</td>
 						</tr>
 					</tbody>

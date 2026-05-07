@@ -60,6 +60,7 @@ class Logger {
 		add_action( 'user_register',   [ $this, 'on_user_register' ], 10, 1 );
 		add_action( 'profile_update',  [ $this, 'on_profile_update' ], 10, 2 );
 		add_action( 'password_reset',  [ $this, 'on_password_reset' ], 10, 1 );
+		add_action( 'set_user_role',   [ $this, 'on_set_user_role' ], 10, 3 );
 	}
 
 	/**
@@ -202,6 +203,46 @@ class Logger {
 		}
 
 		$this->record( 'password_changed', $user_id, $identifier );
+	}
+
+	/**
+	 * User role changed — log only when the new role is administrator.
+	 *
+	 * Captures both "new user created as admin" (old_roles empty) and
+	 * "existing user promoted to admin" (old_roles non-empty). Both
+	 * routes carry the same threat profile — an unexpected admin
+	 * appearing on the site — so we collapse them into a single
+	 * `admin_assigned` event slug. The receiving alert listener can
+	 * still differentiate from the row's `identifier` if needed.
+	 *
+	 * Fires on `set_user_role` rather than `add_user_role` because
+	 * `wp_insert_user` calls set_user_role for the initial role too,
+	 * giving us full coverage with one hook.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param int      $user_id   The user being assigned the role.
+	 * @param string   $role      The role slug being set.
+	 * @param string[] $old_roles Roles the user had before the change.
+	 *
+	 * @return void
+	 */
+	public function on_set_user_role( int $user_id, string $role, array $old_roles ): void {
+		if ( $role !== 'administrator' ) {
+			return;
+		}
+
+		// Skip if they were ALREADY an admin — a no-op role-set on the
+		// same admin user shouldn't generate noise (e.g. profile saves
+		// that re-assert the role without changing it).
+		if ( in_array( 'administrator', $old_roles, true ) ) {
+			return;
+		}
+
+		$user       = get_userdata( $user_id );
+		$identifier = $user ? (string) $user->user_login : '';
+
+		$this->record( 'admin_assigned', $user_id, $identifier );
 	}
 
 	/**
