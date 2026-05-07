@@ -140,6 +140,7 @@ class UserProfile {
 			'logout'            => __( 'Logout',                 'wp-login-activity' ),
 			'registered'        => __( 'Registered',             'wp-login-activity' ),
 			'password_changed'  => __( 'Password changed',       'wp-login-activity' ),
+			'email_changed'     => __( 'Email changed',          'wp-login-activity' ),
 			'admin_assigned'    => __( 'Admin role assigned',    'wp-login-activity' ),
 		];
 

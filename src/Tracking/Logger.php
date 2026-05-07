@@ -144,14 +144,18 @@ class Logger {
 	}
 
 	/**
-	 * Profile updated — log only when the password actually changed.
+	 * Profile updated — diff against the pre-update user data to log
+	 * only meaningful changes.
 	 *
-	 * `profile_update` fires on every profile edit (display name,
-	 * bio, etc.), so we diff `user_pass` against `$old_user_data`
-	 * to avoid log spam on cosmetic edits. The hashed-password
-	 * strings change byte-for-byte even when the plaintext is the
-	 * same (different bcrypt salt) — so a literal `!==` comparison
-	 * is the right test.
+	 * `profile_update` fires on every profile edit (display name, bio,
+	 * URL, etc.). We don't want to log cosmetic changes — we want the
+	 * security-relevant ones: password rotation and email-address
+	 * changes. Each is gated by its own settings toggle and emits its
+	 * own event slug so the admin filter can show one without the
+	 * other.
+	 *
+	 * Both can fire from the same profile-edit save (admin changes
+	 * password AND email at once); both rows are written.
 	 *
 	 * @since 2.0.0
 	 *
@@ -161,20 +165,39 @@ class Logger {
 	 * @return void
 	 */
 	public function on_profile_update( int $user_id, $old_user_data ): void {
-		if ( ! get_option( 'wp_login_activity_log_password_changes', 1 ) ) {
-			return;
-		}
-
-		if ( ! is_object( $old_user_data ) || ! isset( $old_user_data->user_pass ) ) {
+		if ( ! is_object( $old_user_data ) ) {
 			return;
 		}
 
 		$current = get_userdata( $user_id );
-		if ( ! $current || $current->user_pass === $old_user_data->user_pass ) {
+		if ( ! $current ) {
 			return;
 		}
 
-		$this->record( 'password_changed', $user_id, (string) $current->user_login );
+		// Password change — hashed string changes byte-for-byte even
+		// when plaintext is the same (new bcrypt salt), so literal
+		// `!==` is the right test.
+		if (
+			get_option( 'wp_login_activity_log_password_changes', 1 )
+			&& isset( $old_user_data->user_pass )
+			&& $current->user_pass !== $old_user_data->user_pass
+		) {
+			$this->record( 'password_changed', $user_id, (string) $current->user_login );
+		}
+
+		// Email change — case-insensitive comparison so a re-save with
+		// different casing (rare but possible) doesn't generate noise.
+		if (
+			get_option( 'wp_login_activity_log_email_changes', 1 )
+			&& isset( $old_user_data->user_email )
+			&& strtolower( (string) $current->user_email ) !== strtolower( (string) $old_user_data->user_email )
+		) {
+			// Identifier captures the OLD email so the admin alert
+			// can surface "user X switched from foo@old to bar@new"
+			// without joining tables. Format: "old → new".
+			$identifier = sprintf( '%s → %s', $old_user_data->user_email, $current->user_email );
+			$this->record( 'email_changed', $user_id, $identifier );
+		}
 	}
 
 	/**

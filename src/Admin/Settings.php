@@ -73,11 +73,14 @@ class Settings {
 			'wp_login_activity_notify_new_location'           => 'absint',
 			'wp_login_activity_notify_admin_assigned'         => 'absint',
 			'wp_login_activity_notify_admin_password_changed' => 'absint',
+			'wp_login_activity_notify_admin_email_changed'    => 'absint',
+			'wp_login_activity_notify_failed_burst'           => 'absint',
 			'wp_login_activity_notify_recipient'              => [ $this, 'sanitize_recipient' ],
 			'wp_login_activity_log_failed_logins'             => 'absint',
 			'wp_login_activity_log_logouts'                   => 'absint',
 			'wp_login_activity_log_registrations'             => 'absint',
 			'wp_login_activity_log_password_changes'          => 'absint',
+			'wp_login_activity_log_email_changes'             => 'absint',
 		];
 
 		foreach ( $options as $option => $sanitizer ) {
@@ -114,15 +117,18 @@ class Settings {
 			return;
 		}
 
-		$retention      = (int) get_option( 'wp_login_activity_retention_days', 90 );
-		$notify_country = (int) get_option( 'wp_login_activity_notify_new_location', 1 );
+		$retention             = (int) get_option( 'wp_login_activity_retention_days', 90 );
+		$notify_country        = (int) get_option( 'wp_login_activity_notify_new_location', 1 );
 		$notify_admin_assigned = (int) get_option( 'wp_login_activity_notify_admin_assigned', 1 );
 		$notify_admin_pwd      = (int) get_option( 'wp_login_activity_notify_admin_password_changed', 1 );
+		$notify_admin_email    = (int) get_option( 'wp_login_activity_notify_admin_email_changed', 1 );
+		$notify_burst          = (int) get_option( 'wp_login_activity_notify_failed_burst', 0 );
 		$recipient   = (string) get_option( 'wp_login_activity_notify_recipient', 'user' );
 		$failed      = (int) get_option( 'wp_login_activity_log_failed_logins', 1 );
 		$logouts     = (int) get_option( 'wp_login_activity_log_logouts', 1 );
 		$registers   = (int) get_option( 'wp_login_activity_log_registrations', 1 );
 		$pwd_changes = (int) get_option( 'wp_login_activity_log_password_changes', 1 );
+		$email_chgs  = (int) get_option( 'wp_login_activity_log_email_changes', 1 );
 
 		?>
 		<div class="wrap">
@@ -173,6 +179,10 @@ class Settings {
 									<label>
 										<input type="checkbox" name="wp_login_activity_log_password_changes" value="1" <?php checked( $pwd_changes, 1 ); ?> />
 										<?php esc_html_e( 'Password changes (profile edits + lost-password resets)', 'wp-login-activity' ); ?>
+									</label><br />
+									<label>
+										<input type="checkbox" name="wp_login_activity_log_email_changes" value="1" <?php checked( $email_chgs, 1 ); ?> />
+										<?php esc_html_e( 'Email address changes', 'wp-login-activity' ); ?>
 									</label>
 								</fieldset>
 							</td>
@@ -193,6 +203,14 @@ class Settings {
 									<label>
 										<input type="checkbox" name="wp_login_activity_notify_admin_password_changed" value="1" <?php checked( $notify_admin_pwd, 1 ); ?> />
 										<?php esc_html_e( 'Password changed for any admin-capability account. Always emails OTHER admins — not the user whose password just changed.', 'wp-login-activity' ); ?>
+									</label><br />
+									<label>
+										<input type="checkbox" name="wp_login_activity_notify_admin_email_changed" value="1" <?php checked( $notify_admin_email, 1 ); ?> />
+										<?php esc_html_e( 'Email address changed for any admin-capability account. Same admin-only recipient model — common attacker move to lock out the legitimate admin via the password-reset flow.', 'wp-login-activity' ); ?>
+									</label><br />
+									<label>
+										<input type="checkbox" name="wp_login_activity_notify_failed_burst" value="1" <?php checked( $notify_burst, 1 ); ?> />
+										<?php esc_html_e( 'Brute-force / credential-stuffing burst (5+ failed logins on the same identifier in 10 minutes). Off by default; opt in once you know the noise floor for your site. Suppressed for an hour after firing on the same identifier.', 'wp-login-activity' ); ?>
 									</label>
 								</fieldset>
 							</td>

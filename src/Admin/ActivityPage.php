@@ -239,6 +239,7 @@ class ActivityPage {
 			'logout'            => __( 'Logouts',             'wp-login-activity' ),
 			'registered'        => __( 'Registrations',       'wp-login-activity' ),
 			'password_changed'  => __( 'Password changes',    'wp-login-activity' ),
+			'email_changed'     => __( 'Email changes',       'wp-login-activity' ),
 			'admin_assigned'    => __( 'Admin role assigned', 'wp-login-activity' ),
 		];
 	}
@@ -304,6 +305,7 @@ class ActivityPage {
 			'logout'            => __( 'Logout',                 'wp-login-activity' ),
 			'registered'        => __( 'Registered',             'wp-login-activity' ),
 			'password_changed'  => __( 'Password changed',       'wp-login-activity' ),
+			'email_changed'     => __( 'Email changed',          'wp-login-activity' ),
 			'admin_assigned'    => __( 'Admin role assigned',    'wp-login-activity' ),
 		];
 

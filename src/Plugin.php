@@ -23,6 +23,8 @@ use ArrayPress\WP\LoginActivity\Tracking\Cleanup;
 use ArrayPress\WP\LoginActivity\Notifications\NewLocationAlert;
 use ArrayPress\WP\LoginActivity\Notifications\AdminAssignedAlert;
 use ArrayPress\WP\LoginActivity\Notifications\AdminPasswordChangedAlert;
+use ArrayPress\WP\LoginActivity\Notifications\AdminEmailChangedAlert;
+use ArrayPress\WP\LoginActivity\Notifications\FailedLoginBurstAlert;
 
 /**
  * Class Plugin
@@ -87,6 +89,8 @@ final class Plugin {
 		new NewLocationAlert();
 		new AdminAssignedAlert();
 		new AdminPasswordChangedAlert();
+		new AdminEmailChangedAlert();
+		new FailedLoginBurstAlert();
 
 		// 4. Cron purge — expired rows get deleted daily.
 		new Cleanup();
@@ -117,15 +121,23 @@ final class Plugin {
 		( new ActivityTable() )->install();
 
 		$defaults = [
-			'wp_login_activity_retention_days'              => 90,
-			'wp_login_activity_notify_new_location'         => 1,
-			'wp_login_activity_notify_admin_assigned'       => 1,
+			'wp_login_activity_retention_days'                => 90,
+
+			// Email alerts — security-sensitive ones default ON, the
+			// noisier ones (failed-login burst) default OFF.
+			'wp_login_activity_notify_new_location'           => 1,
+			'wp_login_activity_notify_admin_assigned'         => 1,
 			'wp_login_activity_notify_admin_password_changed' => 1,
-			'wp_login_activity_notify_recipient'            => 'user',
-			'wp_login_activity_log_failed_logins'           => 1,
-			'wp_login_activity_log_logouts'                 => 1,
-			'wp_login_activity_log_registrations'           => 1,
-			'wp_login_activity_log_password_changes'        => 1,
+			'wp_login_activity_notify_admin_email_changed'    => 1,
+			'wp_login_activity_notify_failed_burst'           => 0,
+			'wp_login_activity_notify_recipient'              => 'user',
+
+			// Per-event-type capture toggles.
+			'wp_login_activity_log_failed_logins'             => 1,
+			'wp_login_activity_log_logouts'                   => 1,
+			'wp_login_activity_log_registrations'             => 1,
+			'wp_login_activity_log_password_changes'          => 1,
+			'wp_login_activity_log_email_changes'             => 1,
 		];
 
 		foreach ( $defaults as $option => $value ) {
