@@ -95,7 +95,13 @@ final class Plugin {
 		// 4. Cron purge — expired rows get deleted daily.
 		new Cleanup();
 
-		// 5. Admin (settings, list table, user-profile section).
+		// 5. Admin (settings, list table, user-profile section,
+		//    CSV exporter). The Exporter listens on `admin_post_*`
+		//    which fires regardless of menu state, so it's
+		//    instantiated outside the `is_admin()` gate that wraps
+		//    the rendered surfaces.
+		new Admin\Exporter();
+
 		if ( is_admin() ) {
 			add_action( 'init', static function (): void {
 				new Admin\Settings();

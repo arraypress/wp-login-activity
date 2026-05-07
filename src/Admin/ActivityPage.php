@@ -314,9 +314,20 @@ class ActivityPage {
 			$this->list_table->prepare_items();
 		}
 
+		// Inherit whatever filters are active so the export targets
+		// the SAME rows the admin can see, not the entire table.
+		$export_filters = array_intersect_key(
+			$_GET,
+			array_flip( [ 'event_type', 'user_id', 's', 'orderby', 'order' ] )
+		);
+		$export_url = Exporter::url( $export_filters );
+
 		?>
 		<div class="wrap">
 			<h1 class="wp-heading-inline"><?php esc_html_e( 'Login Activity', 'wp-login-activity' ); ?></h1>
+			<a href="<?php echo esc_url( $export_url ); ?>" class="page-title-action">
+				<?php esc_html_e( 'Export CSV', 'wp-login-activity' ); ?>
+			</a>
 			<hr class="wp-header-end" />
 
 			<?php $this->list_table->views(); ?>
