@@ -273,6 +273,13 @@ class Exporter {
 	 * Convert one row to its CSV column array — order MUST match
 	 * the header row written by `stream_csv`.
 	 *
+	 * Every value is run through `csv_safe()` to defuse spreadsheet
+	 * formula injection — many of these fields (identifier,
+	 * user_agent, referer, accept_language, display_name) are
+	 * attacker-controlled at the HTTP layer, and an admin opening
+	 * the export in Excel / Sheets / Numbers shouldn't be trusting
+	 * an `=HYPERLINK(...)` cell to run as a formula on their behalf.
+	 *
 	 * @since 2.0.0
 	 *
 	 * @param ActivityRow $row Row.
@@ -284,7 +291,7 @@ class Exporter {
 		$username = $user ? (string) $user->user_login   : '';
 		$display  = $user ? (string) $user->display_name : '';
 
-		return [
+		return array_map( [ $this, 'csv_safe' ], [
 			(string) $row->id,
 			(string) $row->date_created,
 			(string) $row->event_type,
@@ -305,7 +312,46 @@ class Exporter {
 			(string) $row->accept_language,
 			(string) $row->user_agent,
 			(string) $row->uuid,
-		];
+		] );
+	}
+
+	/**
+	 * Defuse CSV formula injection on a single cell value.
+	 *
+	 * Excel / Google Sheets / Numbers will evaluate any cell whose
+	 * first character is `=`, `+`, `-`, `@`, `\t`, or `\r` as a
+	 * formula. An attacker who can land a value into our log
+	 * (typed identifier on a failed login, User-Agent header,
+	 * Referer, Accept-Language, display_name on open-registration
+	 * sites) can use this to leak data or execute code in the
+	 * spreadsheet app — turning the admin who opens the export
+	 * into the attack vector.
+	 *
+	 * Mitigation per OWASP: prefix the dangerous-leading value with
+	 * a single quote. Spreadsheets render `'=foo` as the literal
+	 * `=foo` text rather than evaluating it; the leading quote is
+	 * also stripped when the cell is copied back out.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param mixed $value Cell value (cast to string).
+	 *
+	 * @return string Safe-to-export value.
+	 */
+	private function csv_safe( $value ): string {
+		$value = (string) $value;
+
+		if ( $value === '' ) {
+			return $value;
+		}
+
+		$first = $value[0];
+
+		if ( $first === '=' || $first === '+' || $first === '-' || $first === '@' || $first === "\t" || $first === "\r" ) {
+			return "'" . $value;
+		}
+
+		return $value;
 	}
 
 }
