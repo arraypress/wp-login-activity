@@ -39,6 +39,7 @@ if ( ! class_exists( 'WP_List_Table' ) ) {
 
 use ArrayPress\WP\LoginActivity\Database\Rows\Activity as ActivityRow;
 use ArrayPress\WP\LoginActivity\Plugin;
+use ArrayPress\Countries\Countries;
 use WP_List_Table;
 
 /**
@@ -969,7 +970,14 @@ class ListTable extends WP_List_Table {
 	}
 
 	/**
-	 * "IP" column.
+	 * "IP" column. Renders the address as a link to ipinfo.io's
+	 * lookup page for that IP — admins investigating an event almost
+	 * always want full external intel (ASN, ISP, abuse history,
+	 * geographic precision) which a third-party service does better
+	 * than we ever could from a local table.
+	 *
+	 * The "Filter by IP" row action stays available for the separate
+	 * "show me everything from this IP on this site" workflow.
 	 *
 	 * @since 2.0.0
 	 *
@@ -978,9 +986,34 @@ class ListTable extends WP_List_Table {
 	 * @return string
 	 */
 	public function column_ip( ActivityRow $row ): string {
-		return $row->ip_address !== ''
-			? '<code>' . esc_html( $row->ip_address ) . '</code>'
-			: '—';
+		if ( $row->ip_address === '' ) {
+			return '—';
+		}
+
+		/**
+		 * Filter the URL the IP cell links to. Allows swapping
+		 * IPInfo for a different reputation service (AbuseIPDB,
+		 * VirusTotal, Shodan, an internal tool) site-wide.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param string      $url Default URL (https://ipinfo.io/{ip}).
+		 * @param string      $ip  The IP being looked up.
+		 * @param ActivityRow $row Row context.
+		 */
+		$lookup_url = apply_filters(
+			'wp_login_activity_ip_lookup_url',
+			'https://ipinfo.io/' . rawurlencode( $row->ip_address ),
+			$row->ip_address,
+			$row
+		);
+
+		return sprintf(
+			'<a href="%s" target="_blank" rel="noopener noreferrer" title="%s"><code>%s</code></a>',
+			esc_url( $lookup_url ),
+			esc_attr__( 'Look up this IP on IPInfo.io', 'wp-login-activity' ),
+			esc_html( $row->ip_address )
+		);
 	}
 
 	/**
@@ -994,9 +1027,17 @@ class ListTable extends WP_List_Table {
 	 * @return string
 	 */
 	public function column_country( ActivityRow $row ): string {
-		$value = $row->country_code !== ''
-			? esc_html( $row->country_code )
-			: '—';
+		if ( $row->country_code === '' ) {
+			return '—';
+		}
+
+		// Use wp-countries to render flag + full name, falling back
+		// to the raw code if the library isn't loaded for any reason
+		// (e.g. someone deleted the vendor dir but the row data still
+		// resolves). format() returns "🇬🇧 United Kingdom".
+		$value = class_exists( Countries::class )
+			? esc_html( Countries::format( $row->country_code, true, false ) )
+			: esc_html( $row->country_code );
 
 		if ( $row->is_new_country() ) {
 			$value .= ' <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:4px;">' . esc_html__( 'NEW', 'wp-login-activity' ) . '</span>';

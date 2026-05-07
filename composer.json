@@ -17,7 +17,8 @@
         "berlindb/core": "^2.0",
         "arraypress/visitor-country": "dev-main",
         "arraypress/wp-ip-utils": "dev-main",
-        "arraypress/wp-user-agent-utils": "dev-main"
+        "arraypress/wp-user-agent-utils": "dev-main",
+        "arraypress/wp-countries": "dev-main"
     },
     "autoload": {
         "psr-4": {
