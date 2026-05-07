@@ -166,6 +166,31 @@ class ListTable extends WP_List_Table {
 	}
 
 	/**
+	 * Override parent to always return an array.
+	 *
+	 * The parent `WP_List_Table::get_hidden_columns()` calls the
+	 * global `get_hidden_columns($screen)` which returns `false` when
+	 * the screen isn't a registered WP screen — which it isn't for
+	 * the user-profile compact embed (we use a synthetic screen ID).
+	 * That `false` then trips `in_array($col, false)` deeper in
+	 * `print_column_headers()` with a TypeError on PHP 8+.
+	 *
+	 * Fix: cast to array. Compact mode also gets an empty array since
+	 * there's no Screen Options panel to drive column hiding from.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return array
+	 */
+	public function get_hidden_columns() {
+		if ( $this->compact ) {
+			return [];
+		}
+
+		return (array) parent::get_hidden_columns();
+	}
+
+	/**
 	 * Per-column orderby key. The values map to BerlinDB Schema
 	 * columns and are validated on the way through prepare_items().
 	 *
@@ -204,13 +229,22 @@ class ListTable extends WP_List_Table {
 		$current = isset( $_GET['event_type'] ) ? sanitize_key( (string) $_GET['event_type'] ) : '';
 		$base    = admin_url( 'users.php?page=wp-login-activity' );
 
+		// Preserve the user-scope filter across status-link clicks.
+		// Without this, navigating between event types from inside a
+		// per-user view drops the scope and silently widens the
+		// dataset to site-wide — a UX trap.
+		$scoped_user_id = isset( $_GET['user_id'] ) ? absint( (string) $_GET['user_id'] ) : 0;
+		if ( $scoped_user_id > 0 ) {
+			$base = add_query_arg( 'user_id', $scoped_user_id, $base );
+		}
+
 		$views = [];
 
 		// "All" bucket — total row count, no event-type filter.
 		$views['all'] = $this->view_link(
 			$base,
 			__( 'All', 'wp-login-activity' ),
-			$this->count_for_event( '' ),
+			$this->count_for_event( '', $scoped_user_id ),
 			$current === ''
 		);
 
@@ -228,7 +262,7 @@ class ListTable extends WP_List_Table {
 			$views[ $slug ] = $this->view_link(
 				add_query_arg( 'event_type', $slug, $base ),
 				$label,
-				$this->count_for_event( $slug ),
+				$this->count_for_event( $slug, $scoped_user_id ),
 				$current === $slug
 			);
 		}
@@ -261,20 +295,22 @@ class ListTable extends WP_List_Table {
 	}
 
 	/**
-	 * Count rows for an event-type bucket. One query per call,
-	 * cached statically per request so re-rendering the bar (e.g.
-	 * on the bottom of the page) doesn't re-query.
+	 * Count rows for an event-type bucket, optionally scoped to a
+	 * single user. One query per call, cached statically per request
+	 * so re-rendering the bar (e.g. on the bottom of the page)
+	 * doesn't re-query.
 	 *
 	 * @since 2.0.0
 	 *
 	 * @param string $event_type Empty string = all events.
+	 * @param int    $user_id    Optional user-scope filter.
 	 *
 	 * @return int
 	 */
-	private function count_for_event( string $event_type ): int {
+	private function count_for_event( string $event_type, int $user_id = 0 ): int {
 		static $cache = [];
 
-		$key = $event_type === '' ? '__all' : $event_type;
+		$key = ( $event_type === '' ? '__all' : $event_type ) . '|u' . $user_id;
 		if ( isset( $cache[ $key ] ) ) {
 			return $cache[ $key ];
 		}
@@ -282,6 +318,9 @@ class ListTable extends WP_List_Table {
 		$args = [ 'count' => true, 'number' => 0 ];
 		if ( $event_type !== '' ) {
 			$args['event_type'] = $event_type;
+		}
+		if ( $user_id > 0 ) {
+			$args['user_id'] = $user_id;
 		}
 
 		$result = Plugin::query()->query( $args );
@@ -497,8 +536,15 @@ class ListTable extends WP_List_Table {
 			return '—';
 		}
 
-		$user_pref = get_user_meta( get_current_user_id(), self::RELATIVE_TIME_OPTION, true );
-		$relative  = $user_pref === '1';
+		// Compact (user-profile embed) defaults to relative — that
+		// surface is "at a glance" recent activity, not forensics.
+		// The full admin page respects the user's screen-options
+		// preference (default off so timestamps stay exact).
+		if ( $this->compact ) {
+			$relative = true;
+		} else {
+			$relative = get_user_meta( get_current_user_id(), self::RELATIVE_TIME_OPTION, true ) === '1';
+		}
 
 		if ( $relative ) {
 			$ts = strtotime( $row->date_created . ' UTC' );
