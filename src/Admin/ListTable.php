@@ -166,17 +166,19 @@ class ListTable extends WP_List_Table {
 			];
 		}
 
+		// Tight, intentional column set. Everything else (Name,
+		// Role, Device, Language, Referer, raw UA, country source,
+		// referrer URL, identifier-typed-value, etc.) lives in the
+		// flyout. Hideable-column toggling for the secondary fields
+		// was adding configuration surface without proportional
+		// value — admins who want forensic depth get it via the
+		// flyout per-row, where it's better laid out anyway.
 		return [
 			'cb'       => '<input type="checkbox" />',
 			'username' => __( 'Username', 'wp-login-activity' ),
-			'name'     => __( 'Name',     'wp-login-activity' ),
-			'role'     => __( 'Role',     'wp-login-activity' ),
 			'event'    => __( 'Event',    'wp-login-activity' ),
 			'ip'       => __( 'IP',       'wp-login-activity' ),
 			'country'  => __( 'Country',  'wp-login-activity' ),
-			'device'   => __( 'Device',   'wp-login-activity' ),
-			'language' => __( 'Language', 'wp-login-activity' ),
-			'referer'  => __( 'Referer',  'wp-login-activity' ),
 			'date'     => __( 'Date',     'wp-login-activity' ),
 		];
 	}
@@ -191,33 +193,25 @@ class ListTable extends WP_List_Table {
 	 * @return string[]
 	 */
 	public function get_hideable_columns(): array {
-		// Username is the primary identifier column; not hideable.
-		// Date anchors the sort (also not hideable). Everything else
-		// is toggleable via Screen Options.
-		return [ 'name', 'role', 'ip', 'country', 'device', 'language', 'referer' ];
+		// All five non-primary, non-Date columns are toggleable.
+		// Username is the row's primary column; Date anchors the
+		// sort. The legacy "secondary" columns (Name, Role, Device,
+		// Language, Referer) are no longer columns at all — they
+		// surface in the flyout instead.
+		return [ 'event', 'ip', 'country' ];
 	}
 
 	/**
-	 * Columns hidden by default for fresh users (no saved Screen
-	 * Options state yet). WP merges this with the user's saved
-	 * preferences via the `default_hidden_columns` filter hook,
-	 * which we wire from ActivityPage.
-	 *
-	 * Language + Referer ship hidden because they're forensic-detail
-	 * columns useful in specific investigations but not at-a-glance.
-	 * Admins opt into showing them via Screen Options when needed,
-	 * and the detail row already exposes them.
+	 * Columns hidden by default. Empty since we shipped the minimal
+	 * 5-column main view — every remaining column is high-value-at-
+	 * a-glance and visible by default.
 	 *
 	 * @since 2.0.0
 	 *
 	 * @return string[]
 	 */
 	public static function get_default_hidden_columns(): array {
-		// Plugin's default UX is a minimal 5-column main view; the
-		// flyout panel surfaces everything else on demand. These
-		// columns stay hideable so admins who prefer full-table
-		// mode can toggle them back on via Screen Options.
-		return [ 'name', 'role', 'device', 'language', 'referer' ];
+		return [];
 	}
 
 	/**
@@ -265,11 +259,9 @@ class ListTable extends WP_List_Table {
 		return [
 			'date'     => [ 'date_created', true ],   // default-desc
 			'username' => [ 'identifier', false ],
-			'name'     => [ 'user_id', false ],
 			'event'    => [ 'event_type', false ],
 			'ip'       => [ 'ip_address', false ],
 			'country'  => [ 'country_code', false ],
-			'role'     => [ 'user_role', false ],
 		];
 	}
 
@@ -633,16 +625,17 @@ class ListTable extends WP_List_Table {
 
 		$actions = [];
 
-		$actions['view'] = sprintf(
-			'<a href="#" class="wpla-toggle-details" data-row-id="%d" aria-expanded="false">%s</a>',
-			(int) $row->id,
-			esc_html__( 'View details', 'wp-login-activity' )
-		);
-
-		// "Filter by user" + "Filter by IP" actions used to live here
-		// — superseded by direct click on the username + IP cells
-		// themselves (matches WP Users / Posts list-table convention
-		// where clicking the primary column drills in).
+		// "Filter by user" needs an explicit row action because
+		// clicking the username opens the flyout (drill into one
+		// event), not the filter (scope to all events for that
+		// user). Different operations, different paths.
+		if ( $row->user_id > 0 ) {
+			$actions['filter_user'] = sprintf(
+				'<a href="%s">%s</a>',
+				esc_url( add_query_arg( 'user_id', (int) $row->user_id, $base ) ),
+				esc_html__( 'Filter by user', 'wp-login-activity' )
+			);
+		}
 
 		$delete_url = wp_nonce_url(
 			add_query_arg(
@@ -814,13 +807,18 @@ class ListTable extends WP_List_Table {
 		$filter_ip_url = $row->ip_address !== ''
 			? add_query_arg( 's', $row->ip_address, $base_url )
 			: '';
-		$ipinfo_url    = $row->ip_address !== ''
-			? 'https://ipinfo.io/' . rawurlencode( $row->ip_address )
-			: '';
 		$delete_url = wp_nonce_url(
 			add_query_arg( [ 'action' => 'delete', 'activity' => (int) $row->id ], $base_url ),
 			'wpla_delete_' . (int) $row->id
 		);
+
+		// External-lookup services (IPInfo by default, plus whatever
+		// the wp_login_activity_ip_lookup_services filter adds).
+		// Used to live in a kebab dropdown on the IP column — moved
+		// here to keep the column tight; same plugin extension point.
+		$ip_services = $row->ip_address !== ''
+			? $this->ip_lookup_services( $row->ip_address, $row )
+			: [];
 
 		// Pre-build sections as label-value arrays then render in a
 		// loop so empty-value rows can be skipped uniformly.
@@ -870,19 +868,19 @@ class ListTable extends WP_List_Table {
 			<?php if ( $avatar !== '' ) : ?>
 				<span class="wpla-flyout__avatar"><?php echo $avatar; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></span>
 			<?php endif; ?>
-			<div>
-				<span style="display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;background:<?php echo esc_attr( $bg ); ?>;color:<?php echo esc_attr( $fg ); ?>;">
-					<?php echo esc_html( $this->event_label( $row->event_type ) ); ?>
-				</span>
-				<?php if ( $row->is_current_session() ) : ?>
-					<span style="margin-left:6px;display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:#e0ecfb;color:#1d4ed8;">
-						<?php esc_html_e( 'CURRENT SESSION', 'wp-login-activity' ); ?>
+			<div class="wpla-flyout__header-meta">
+				<div class="wpla-flyout__badges">
+					<span class="wpla-flyout__event-badge" style="background:<?php echo esc_attr( $bg ); ?>;color:<?php echo esc_attr( $fg ); ?>;">
+						<?php echo esc_html( $this->event_label( $row->event_type ) ); ?>
 					</span>
-				<?php endif; ?>
-				<h2 style="margin:6px 0 0;font-size:18px;line-height:1.3;">
-					<?php echo esc_html( $display ); ?>
-				</h2>
-				<div style="color:#646970;font-size:13px;margin-top:2px;"><?php echo $date_disp; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></div>
+					<?php if ( $row->is_current_session() ) : ?>
+						<span class="wpla-flyout__current-session-badge">
+							<?php esc_html_e( 'Current session', 'wp-login-activity' ); ?>
+						</span>
+					<?php endif; ?>
+				</div>
+				<h2 class="wpla-flyout__title"><?php echo esc_html( $display ); ?></h2>
+				<div class="wpla-flyout__subtitle"><?php echo $date_disp; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></div>
 			</div>
 		</header>
 
@@ -891,6 +889,19 @@ class ListTable extends WP_List_Table {
 			<?php $this->render_flyout_section( __( 'Where', 'wp-login-activity' ), $where_pairs ); ?>
 			<?php $this->render_flyout_section( __( 'How',   'wp-login-activity' ), $how_pairs ); ?>
 			<?php $this->render_flyout_section( __( 'Raw',   'wp-login-activity' ), $raw_pairs ); ?>
+
+			<?php if ( ! empty( $ip_services ) ) : ?>
+				<section class="wpla-flyout__section">
+					<h3><?php esc_html_e( 'External Lookup', 'wp-login-activity' ); ?></h3>
+					<div class="wpla-flyout__links">
+						<?php foreach ( $ip_services as $service ) : ?>
+							<a href="<?php echo esc_url( (string) $service['url'] ); ?>" target="_blank" rel="noopener noreferrer">
+								<?php echo esc_html( (string) $service['label'] ); ?> ↗
+							</a>
+						<?php endforeach; ?>
+					</div>
+				</section>
+			<?php endif; ?>
 		</div>
 
 		<footer class="wpla-flyout__footer">
@@ -900,16 +911,17 @@ class ListTable extends WP_List_Table {
 			<?php if ( $filter_ip_url !== '' ) : ?>
 				<a href="<?php echo esc_url( $filter_ip_url ); ?>" class="button"><?php esc_html_e( 'Filter by IP', 'wp-login-activity' ); ?></a>
 			<?php endif; ?>
-			<?php if ( $ipinfo_url !== '' ) : ?>
-				<a href="<?php echo esc_url( $ipinfo_url ); ?>" class="button" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'IPInfo.io ↗', 'wp-login-activity' ); ?></a>
-			<?php endif; ?>
-			<a href="<?php echo esc_url( $delete_url ); ?>" class="button button-link-delete" style="margin-left:auto;"><?php esc_html_e( 'Delete', 'wp-login-activity' ); ?></a>
+			<a href="<?php echo esc_url( $delete_url ); ?>" class="button button-link-delete wpla-flyout__footer-delete"><?php esc_html_e( 'Delete', 'wp-login-activity' ); ?></a>
 		</footer>
 		<?php
 	}
 
 	/**
 	 * Render one section of the flyout body.
+	 *
+	 * Each section is a labelled card with a `form-table`-style
+	 * label/value layout — feels native because it borrows the
+	 * exact pattern WP uses for Settings screens.
 	 *
 	 * @since 2.0.0
 	 *
@@ -926,12 +938,16 @@ class ListTable extends WP_List_Table {
 		?>
 		<section class="wpla-flyout__section">
 			<h3><?php echo esc_html( $title ); ?></h3>
-			<dl>
-				<?php foreach ( $pairs as $label => $value ) : ?>
-					<dt><?php echo esc_html( (string) $label ); ?></dt>
-					<dd><?php echo esc_html( (string) $value ); ?></dd>
-				<?php endforeach; ?>
-			</dl>
+			<table class="wpla-flyout__table">
+				<tbody>
+					<?php foreach ( $pairs as $label => $value ) : ?>
+						<tr>
+							<th scope="row"><?php echo esc_html( (string) $label ); ?></th>
+							<td><?php echo esc_html( (string) $value ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
 		</section>
 		<?php
 	}
@@ -1129,23 +1145,25 @@ class ListTable extends WP_List_Table {
 	 * @return string
 	 */
 	public function column_username( ActivityRow $row ): string {
-		$base = admin_url( 'users.php?page=wp-login-activity' );
+		// Click on the username opens the flyout panel with full
+		// detail for this row — matches WP convention where clicking
+		// the primary column drills into "the thing". The
+		// `wpla-toggle-details` JS handler hooks any link with that
+		// class. "Filter by user" stays accessible via the hover-
+		// revealed row action.
+		$trigger_attrs = sprintf(
+			'class="wpla-toggle-details" data-row-id="%d" aria-expanded="false"',
+			(int) $row->id
+		);
 
 		if ( $row->user_id > 0 ) {
 			$user = get_userdata( $row->user_id );
 			if ( $user ) {
-				// Click filters the table by this user. WP Users
-				// list table convention is to link the username to
-				// edit-user, but in an audit-log surface "show me
-				// every event for this person" is the dominant
-				// workflow — edit-user is one row-action click away
-				// via the "Filter by user" alternative path.
-				$filter_url = add_query_arg( 'user_id', (int) $row->user_id, $base );
-				$avatar     = get_avatar( $row->user_id, 32 );
-				$link       = sprintf(
-					'<strong><a href="%s" title="%s">%s</a></strong>',
-					esc_url( $filter_url ),
-					esc_attr__( 'Filter the activity log by this user', 'wp-login-activity' ),
+				$avatar = get_avatar( $row->user_id, 32 );
+				$link   = sprintf(
+					'<strong><a href="#" %s title="%s">%s</a></strong>',
+					$trigger_attrs,
+					esc_attr__( 'View full event details', 'wp-login-activity' ),
 					esc_html( (string) $user->user_login )
 				);
 
@@ -1153,45 +1171,16 @@ class ListTable extends WP_List_Table {
 			}
 		}
 
-		// Unresolved row — show the typed identifier in monospace,
-		// linked to a search-filter so admins can see every failed
-		// attempt against the same string. No avatar (we don't know
-		// the user behind the typed value).
+		// Unresolved row — typed identifier in monospace, also a
+		// flyout trigger so admins can see exactly what was typed
+		// alongside everything else captured for the failed attempt.
 		if ( $row->identifier !== '' ) {
-			$search_url = add_query_arg( 's', $row->identifier, $base );
-
 			return sprintf(
-				'<a href="%s" title="%s"><code>%s</code></a>',
-				esc_url( $search_url ),
-				esc_attr__( 'Filter the activity log by this identifier', 'wp-login-activity' ),
+				'<a href="#" %s title="%s"><code>%s</code></a>',
+				$trigger_attrs,
+				esc_attr__( 'View full event details', 'wp-login-activity' ),
 				esc_html( $row->identifier )
 			);
-		}
-
-		return '—';
-	}
-
-	/**
-	 * "Name" column — the user's display_name, mirroring WP core's
-	 * Users-list-table second column. Linked to the edit-user screen
-	 * the same way Username is.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param ActivityRow $row Row.
-	 *
-	 * @return string
-	 */
-	public function column_name( ActivityRow $row ): string {
-		if ( $row->user_id > 0 ) {
-			$user = get_userdata( $row->user_id );
-			if ( $user ) {
-				return sprintf(
-					'<a href="%s">%s</a>',
-					esc_url( get_edit_user_link( $row->user_id ) ),
-					esc_html( (string) $user->display_name )
-				);
-			}
 		}
 
 		return '—';
@@ -1268,32 +1257,14 @@ class ListTable extends WP_List_Table {
 	}
 
 	/**
-	 * "Role" column — snapshot of the user's primary role at the
-	 * time of the event.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param ActivityRow $row Row.
-	 *
-	 * @return string
-	 */
-	public function column_role( ActivityRow $row ): string {
-		$label = $row->get_role_label();
-
-		return $label !== '' ? esc_html( $label ) : '—';
-	}
-
-	/**
 	 * "IP" column.
 	 *
-	 * Click the IP itself = filter the table by this IP (the dominant
-	 * "show me everything from this address" workflow). The small
-	 * kebab icon next to the IP opens a dropdown of external-lookup
-	 * services — IPInfo by default, plus whatever plugins register
-	 * via the `wp_login_activity_ip_lookup_services` filter
-	 * (AbuseIPDB, VirusTotal, Shodan, an internal reputation tool).
-	 * Splitting click vs dropdown keeps the common case one click
-	 * away while the rarer external intel stays discoverable.
+	 * Click filters the table by this IP — the dominant "show me
+	 * everything from this address" workflow. External lookup
+	 * services (IPInfo, AbuseIPDB, etc.) live in the flyout footer
+	 * now rather than a kebab dropdown next to the cell — the cell
+	 * stays focused on its primary action and the lookup options
+	 * are still one click away via the row's flyout.
 	 *
 	 * @since 2.0.0
 	 *
@@ -1309,43 +1280,12 @@ class ListTable extends WP_List_Table {
 		$base       = admin_url( 'users.php?page=wp-login-activity' );
 		$filter_url = add_query_arg( 's', $row->ip_address, $base );
 
-		$ip_link = sprintf(
+		return sprintf(
 			'<a href="%s" title="%s"><code>%s</code></a>',
 			esc_url( $filter_url ),
 			esc_attr__( 'Filter the activity log by this IP', 'wp-login-activity' ),
 			esc_html( $row->ip_address )
 		);
-
-		$services = $this->ip_lookup_services( $row->ip_address, $row );
-
-		if ( empty( $services ) ) {
-			return $ip_link;
-		}
-
-		// Vanilla-CSS dropdown — toggled via the inline JS in
-		// ActivityPage::print_inline_assets(). Aria attributes mirror
-		// WP core's Posts row-action menus.
-		ob_start();
-		?>
-		<span class="wpla-ip-tools">
-			<?php echo $ip_link; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-			<button type="button"
-			        class="wpla-ip-tools-trigger"
-			        aria-label="<?php esc_attr_e( 'External lookup services', 'wp-login-activity' ); ?>"
-			        aria-haspopup="true"
-			        aria-expanded="false"
-			        data-row-id="<?php echo (int) $row->id; ?>">⋯</button>
-			<span class="wpla-ip-tools-menu" role="menu" hidden>
-				<?php foreach ( $services as $service ) : ?>
-					<a href="<?php echo esc_url( (string) $service['url'] ); ?>"
-					   role="menuitem"
-					   target="_blank"
-					   rel="noopener noreferrer"><?php echo esc_html( (string) $service['label'] ); ?></a>
-				<?php endforeach; ?>
-			</span>
-		</span>
-		<?php
-		return (string) ob_get_clean();
 	}
 
 	/**
@@ -1430,81 +1370,6 @@ class ListTable extends WP_List_Table {
 		}
 
 		return $value;
-	}
-
-	/**
-	 * "Device" column — formatted UA + BOT badge.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param ActivityRow $row Row.
-	 *
-	 * @return string
-	 */
-	public function column_device( ActivityRow $row ): string {
-		$formatted = $row->get_formatted_user_agent();
-		$value     = $formatted !== '' ? esc_html( $formatted ) : '—';
-
-		if ( $row->is_bot() ) {
-			$value .= ' <span style="background:#fde2e2;color:#9b1c1c;padding:1px 6px;border-radius:3px;font-size:11px;margin-left:4px;">' . esc_html__( 'BOT', 'wp-login-activity' ) . '</span>';
-		}
-
-		return $value;
-	}
-
-	/**
-	 * "Language" column — renders just the primary language tag
-	 * (e.g. "en-GB"). The full Accept-Language string is in the
-	 * detail row + CSV export. The cell is `<code>`-styled so an
-	 * unfamiliar tag stands out against neighbouring rows where
-	 * everyone else has the same locale.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param ActivityRow $row Row.
-	 *
-	 * @return string
-	 */
-	public function column_language( ActivityRow $row ): string {
-		$primary = $row->get_primary_language();
-
-		return $primary !== ''
-			? '<code>' . esc_html( $primary ) . '</code>'
-			: '—';
-	}
-
-	/**
-	 * "Referer" column — the HTTP_REFERER captured at request time.
-	 *
-	 * Most logins go via the wp-login.php form so the column is
-	 * homogeneous-looking until something stands out (an API request
-	 * that hit auth without going through the login page, an unusual
-	 * referrer domain, etc.). Truncated for readability in-cell;
-	 * the full URL is in the detail row.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param ActivityRow $row Row.
-	 *
-	 * @return string
-	 */
-	public function column_referer( ActivityRow $row ): string {
-		if ( $row->referer === '' ) {
-			return '—';
-		}
-
-		// Show host + first ~30 chars of path; full URL on hover and
-		// in the detail row.
-		$short = $row->referer;
-		if ( mb_strlen( $short ) > 50 ) {
-			$short = mb_substr( $short, 0, 47 ) . '…';
-		}
-
-		return sprintf(
-			'<span title="%s">%s</span>',
-			esc_attr( $row->referer ),
-			esc_html( $short )
-		);
 	}
 
 	/**

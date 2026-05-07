@@ -430,121 +430,154 @@ class ActivityPage {
 			}
 			.wpla-flyout__close {
 				position: absolute;
-				top: 8px;
-				right: 12px;
+				top: 10px;
+				right: 14px;
 				background: transparent;
 				border: 0;
-				font-size: 26px;
+				font-size: 24px;
 				line-height: 1;
 				color: #50575e;
 				cursor: pointer;
 				padding: 4px 10px;
 				border-radius: 3px;
+				z-index: 1;
 			}
 			.wpla-flyout__close:hover {
 				background: #f0f0f1;
 				color: #1d2327;
 			}
+
+			/* Header — avatar + event badge + title + subtitle.
+			   Generous padding mirrors WP's settings-screen sectioning. */
 			.wpla-flyout__header {
-				padding: 22px 24px 18px;
-				border-bottom: 1px solid #f0f0f1;
+				padding: 24px 28px 20px;
+				border-bottom: 1px solid #dcdcde;
+				background: #fff;
 				display: flex;
-				gap: 14px;
+				gap: 16px;
 				align-items: flex-start;
 			}
 			.wpla-flyout__avatar img {
 				border-radius: 50%;
 			}
+			.wpla-flyout__header-meta {
+				min-width: 0;
+				flex: 1;
+			}
+			.wpla-flyout__badges {
+				display: flex;
+				gap: 6px;
+				flex-wrap: wrap;
+			}
+			.wpla-flyout__event-badge {
+				display: inline-block;
+				padding: 2px 8px;
+				border-radius: 3px;
+				font-size: 11px;
+				font-weight: 600;
+				text-transform: uppercase;
+				letter-spacing: .3px;
+			}
+			.wpla-flyout__current-session-badge {
+				display: inline-block;
+				padding: 2px 8px;
+				border-radius: 3px;
+				font-size: 11px;
+				font-weight: 600;
+				background: #e0ecfb;
+				color: #1d4ed8;
+				text-transform: uppercase;
+				letter-spacing: .3px;
+			}
+			.wpla-flyout__title {
+				margin: 8px 0 2px;
+				padding: 0;
+				font-size: 18px;
+				font-weight: 600;
+				line-height: 1.3;
+				color: #1d2327;
+			}
+			.wpla-flyout__subtitle {
+				color: #646970;
+				font-size: 13px;
+			}
+
+			/* Body — sectioned with form-table-style label/value
+			   pairs. Same visual vocabulary as WP's Settings → General. */
 			.wpla-flyout__body {
 				flex: 1;
 				overflow-y: auto;
-				padding: 16px 24px;
+				padding: 0;
+				background: #f6f7f7;
 			}
 			.wpla-flyout__section {
-				margin-bottom: 22px;
+				background: #fff;
+				border-bottom: 1px solid #dcdcde;
+				padding: 20px 28px;
+			}
+			.wpla-flyout__section:last-child {
+				border-bottom: 0;
 			}
 			.wpla-flyout__section h3 {
-				font-size: 11px;
+				margin: 0 0 12px;
+				padding: 0;
+				font-size: 13px;
+				font-weight: 600;
+				color: #1d2327;
 				text-transform: uppercase;
 				letter-spacing: .5px;
-				color: #646970;
-				margin: 0 0 8px;
-				font-weight: 600;
 			}
-			.wpla-flyout__section dl {
-				margin: 0;
-				display: grid;
-				grid-template-columns: max-content 1fr;
-				gap: 4px 14px;
+			.wpla-flyout__table {
+				width: 100%;
+				border-collapse: collapse;
 				font-size: 13px;
 			}
-			.wpla-flyout__section dt {
-				font-weight: 600;
-				color: #50575e;
+			.wpla-flyout__table th,
+			.wpla-flyout__table td {
+				padding: 8px 0;
+				text-align: left;
+				vertical-align: top;
+				border-bottom: 1px solid #f0f0f1;
+				line-height: 1.5;
 			}
-			.wpla-flyout__section dd {
-				margin: 0;
-				word-break: break-word;
+			.wpla-flyout__table tr:last-child th,
+			.wpla-flyout__table tr:last-child td {
+				border-bottom: 0;
+			}
+			.wpla-flyout__table th {
+				width: 38%;
+				font-weight: 500;
+				color: #646970;
+				padding-right: 16px;
+			}
+			.wpla-flyout__table td {
 				color: #1d2327;
+				word-break: break-word;
+				font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+				font-size: 12px;
 			}
+			.wpla-flyout__links {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 12px;
+			}
+			.wpla-flyout__links a {
+				font-size: 13px;
+			}
+
+			/* Footer — sticky action bar. */
 			.wpla-flyout__footer {
-				padding: 14px 24px;
-				border-top: 1px solid #f0f0f1;
+				padding: 14px 28px;
+				border-top: 1px solid #dcdcde;
 				display: flex;
 				gap: 8px;
 				align-items: center;
-				background: #fafafb;
+				background: #fff;
+			}
+			.wpla-flyout__footer-delete {
+				margin-left: auto;
 			}
 
-			/* IP cell external-lookup dropdown. Position relative
-			   on the wrapper, absolute on the menu so it floats
-			   over adjacent rows without expanding the cell height. */
-			.wpla-ip-tools {
-				display: inline-flex;
-				align-items: center;
-				gap: 4px;
-				position: relative;
-			}
-			.wpla-ip-tools-trigger {
-				background: transparent;
-				border: 1px solid #c3c4c7;
-				border-radius: 3px;
-				color: #50575e;
-				cursor: pointer;
-				font-size: 13px;
-				line-height: 1;
-				padding: 1px 6px;
-				min-height: 20px;
-			}
-			.wpla-ip-tools-trigger:hover,
-			.wpla-ip-tools-trigger[aria-expanded="true"] {
-				background: #f0f0f1;
-				border-color: #8c8f94;
-			}
-			.wpla-ip-tools-menu {
-				position: absolute;
-				top: calc(100% + 4px);
-				left: 0;
-				min-width: 180px;
-				background: #fff;
-				border: 1px solid #c3c4c7;
-				border-radius: 3px;
-				box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-				padding: 4px 0;
-				z-index: 100;
-			}
-			.wpla-ip-tools-menu a {
-				display: block;
-				padding: 6px 12px;
-				color: #2271b1;
-				text-decoration: none;
-				font-size: 13px;
-				white-space: nowrap;
-			}
-			.wpla-ip-tools-menu a:hover {
-				background: #f0f6ff;
-				color: #135e96;
-			}
 		</style>
 		<script>
 			( function () {
@@ -623,38 +656,6 @@ class ActivityPage {
 				document.addEventListener( 'keydown', function ( e ) {
 					if ( e.key === 'Escape' ) {
 						closeFlyout();
-						closeAllIpMenus();
-					}
-				} );
-
-				// IP-cell external-lookup dropdown — one menu open at
-				// a time, click outside closes.
-				function closeAllIpMenus() {
-					document.querySelectorAll( '.wpla-ip-tools-menu' ).forEach( function ( menu ) {
-						menu.setAttribute( 'hidden', '' );
-					} );
-					document.querySelectorAll( '.wpla-ip-tools-trigger' ).forEach( function ( btn ) {
-						btn.setAttribute( 'aria-expanded', 'false' );
-					} );
-				}
-				document.addEventListener( 'click', function ( e ) {
-					var trigger = e.target.closest( '.wpla-ip-tools-trigger' );
-					if ( trigger ) {
-						e.preventDefault();
-						var menu = trigger.parentElement.querySelector( '.wpla-ip-tools-menu' );
-						if ( ! menu ) {
-							return;
-						}
-						var willOpen = menu.hasAttribute( 'hidden' );
-						closeAllIpMenus();
-						if ( willOpen ) {
-							menu.removeAttribute( 'hidden' );
-							trigger.setAttribute( 'aria-expanded', 'true' );
-						}
-						return;
-					}
-					if ( ! e.target.closest( '.wpla-ip-tools-menu' ) ) {
-						closeAllIpMenus();
 					}
 				} );
 			} )();
