@@ -527,23 +527,31 @@ class ListTable extends WP_List_Table {
 	 * @return void
 	 */
 	private function process_bulk_action(): void {
-		// Bulk-delete via the dropdown.
-		if ( $this->current_action() === 'delete' && ! empty( $_REQUEST['activity'] ) ) {
+		if ( $this->current_action() !== 'delete' || empty( $_REQUEST['activity'] ) ) {
+			return;
+		}
+
+		// Bulk and single-row delete share the same `action=delete`
+		// query param. Discriminate by shape: the bulk form submits
+		// `activity[]=N&activity[]=M` (PHP unpacks to an array); the
+		// row-action link submits `activity=N` (scalar). Picking the
+		// wrong nonce here is what produced the "link has expired"
+		// error — bulk's `bulk-activities` nonce doesn't match the
+		// row link's `wpla_delete_{id}` nonce.
+		if ( is_array( $_REQUEST['activity'] ) ) {
 			check_admin_referer( 'bulk-activities' );
 			$this->delete_rows( array_map( 'absint', (array) $_REQUEST['activity'] ) );
 
 			return;
 		}
 
-		// Single-row delete via the row-action link
-		// (`?action=delete&activity=N&_wpnonce=...`).
-		if ( ! empty( $_REQUEST['action'] ) && $_REQUEST['action'] === 'delete' && ! empty( $_REQUEST['activity'] ) ) {
-			$id = absint( (string) $_REQUEST['activity'] );
-			if ( $id > 0 ) {
-				check_admin_referer( 'wpla_delete_' . $id );
-				$this->delete_rows( [ $id ] );
-			}
+		$id = absint( (string) $_REQUEST['activity'] );
+		if ( $id <= 0 ) {
+			return;
 		}
+
+		check_admin_referer( 'wpla_delete_' . $id );
+		$this->delete_rows( [ $id ] );
 	}
 
 	/**
