@@ -120,7 +120,10 @@ class Logger {
 	 * @return void
 	 */
 	public function on_login_failed( $username, $error = null ): void {
+		self::debug_log( 'on_login_failed: hook fired, username=' . var_export( $username, true ) );
+
 		if ( ! get_option( 'wp_login_activity_log_failed_logins', 1 ) ) {
+			self::debug_log( 'on_login_failed: bailing — wp_login_activity_log_failed_logins option is off' );
 			return;
 		}
 
@@ -130,6 +133,8 @@ class Logger {
 			? ( get_user_by( 'login', $username ) ?: get_user_by( 'email', $username ) )
 			: false;
 		$user_id = $user instanceof WP_User ? (int) $user->ID : 0;
+
+		self::debug_log( "on_login_failed: about to record — user_id=$user_id identifier=$username" );
 
 		$this->record( 'login_failed', $user_id, $username );
 	}
@@ -309,6 +314,28 @@ class Logger {
 	}
 
 	/**
+	 * Write a diagnostic line to the WordPress debug log.
+	 *
+	 * Gated on `WP_DEBUG_LOG` so production sites without debug
+	 * logging on don't accumulate noise. Used during development /
+	 * support to trace why a particular event didn't record.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $message Log line.
+	 *
+	 * @return void
+	 */
+	public static function debug_log( string $message ): void {
+		if ( ! defined( 'WP_DEBUG_LOG' ) || ! WP_DEBUG_LOG ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+		error_log( '[wp-login-activity] ' . $message );
+	}
+
+	/**
 	 * Insert a row + fire the post-insert action.
 	 *
 	 * @since 2.0.0
@@ -366,8 +393,16 @@ class Logger {
 		$row_id = Plugin::query()->add_item( $data );
 
 		if ( ! $row_id ) {
+			global $wpdb;
+			self::debug_log(
+				'record: add_item returned falsy for event_type=' . $event_type
+				. ' user_id=' . $user_id
+				. ( ! empty( $wpdb->last_error ) ? ' wpdb_last_error=' . $wpdb->last_error : '' )
+			);
 			return;
 		}
+
+		self::debug_log( "record: inserted row_id=$row_id event_type=$event_type" );
 
 		$row = Plugin::query()->get_item( $row_id );
 

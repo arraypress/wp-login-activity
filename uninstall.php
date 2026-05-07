@@ -21,12 +21,12 @@ global $wpdb;
 // Drop the BerlinDB table. We use raw DDL here rather than booting
 // the plugin's BerlinDB classes — uninstall runs in a stripped-down
 // context where plugin autoloading isn't guaranteed.
-$table = $wpdb->prefix . 'wpla_activity';
+$table = $wpdb->prefix . 'login_activity';
 $wpdb->query( "DROP TABLE IF EXISTS {$table}" ); // phpcs:ignore WordPress.DB
 
 // Drop the BerlinDB-managed schema-version option that tracks the
 // installed table version separately from the plugin version.
-delete_option( "wpdb_{$wpdb->prefix}wpla_activity_version" );
+delete_option( "wpdb_{$wpdb->prefix}login_activity_version" );
 
 // Plugin options.
 $options = [

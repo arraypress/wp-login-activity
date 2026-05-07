@@ -40,7 +40,7 @@ class Activity extends Query {
 	 * @since 2.0.0
 	 * @var   string
 	 */
-	protected $table_name = 'wpla_activity';
+	protected $table_name = 'login_activity';
 
 	/**
 	 * Singular name for the entity — used by BerlinDB for cache keys
