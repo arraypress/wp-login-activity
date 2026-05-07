@@ -362,6 +362,18 @@ class ActivityPage {
 	private function print_inline_assets(): void {
 		?>
 		<style>
+			/* Override WP's automatic position-based striping
+			   (.striped > tbody > :nth-child(odd)) — the injected
+			   .wpla-detail-row siblings throw the parity off, so we
+			   apply zebra class manually in PHP and override WP's
+			   selector here. */
+			.wp-list-table.striped > tbody > :nth-child(odd) {
+				background-color: transparent;
+			}
+			.wp-list-table.striped > tbody > tr.wpla-alt {
+				background-color: #f6f7f7;
+			}
+
 			.wpla-current-session > td { background: #f0f6ff !important; }
 			.wpla-current-session > td:first-child { box-shadow: inset 3px 0 0 0 #2271b1; }
 			.wpla-detail-row > td { border-top: 0 !important; }

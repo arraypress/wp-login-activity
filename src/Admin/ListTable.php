@@ -128,30 +128,31 @@ class ListTable extends WP_List_Table {
 	 * @return array<string, string>
 	 */
 	public function get_columns(): array {
-		$columns = [];
-
-		// Compact mode (user-profile embed) skips the bulk-action
-		// checkbox AND the "User" + "Username" + "Role" columns —
-		// the surrounding context already names the user, repeating
-		// that on every row would be visual noise.
-		if ( ! $this->compact ) {
-			$columns['cb']       = '<input type="checkbox" />';
+		// Full-mode column order mirrors WordPress core's Users list
+		// table: cb | Username (primary) | Name | Role | … | Date
+		// rightmost (Posts-table convention). Compact mode keeps Date
+		// first since there's no Username column to anchor on.
+		if ( $this->compact ) {
+			return [
+				'date'    => __( 'Date',    'wp-login-activity' ),
+				'event'   => __( 'Event',   'wp-login-activity' ),
+				'ip'      => __( 'IP',      'wp-login-activity' ),
+				'country' => __( 'Country', 'wp-login-activity' ),
+				'device'  => __( 'Device',  'wp-login-activity' ),
+			];
 		}
 
-		$columns['when']  = __( 'When',  'wp-login-activity' );
-
-		if ( ! $this->compact ) {
-			$columns['user']     = __( 'User',     'wp-login-activity' );
-			$columns['username'] = __( 'Username', 'wp-login-activity' );
-			$columns['role']     = __( 'Role',     'wp-login-activity' );
-		}
-
-		$columns['event']   = __( 'Event',   'wp-login-activity' );
-		$columns['ip']      = __( 'IP',      'wp-login-activity' );
-		$columns['country'] = __( 'Country', 'wp-login-activity' );
-		$columns['device']  = __( 'Device',  'wp-login-activity' );
-
-		return $columns;
+		return [
+			'cb'       => '<input type="checkbox" />',
+			'username' => __( 'Username', 'wp-login-activity' ),
+			'name'     => __( 'Name',     'wp-login-activity' ),
+			'role'     => __( 'Role',     'wp-login-activity' ),
+			'event'    => __( 'Event',    'wp-login-activity' ),
+			'ip'       => __( 'IP',       'wp-login-activity' ),
+			'country'  => __( 'Country',  'wp-login-activity' ),
+			'device'   => __( 'Device',   'wp-login-activity' ),
+			'date'     => __( 'Date',     'wp-login-activity' ),
+		];
 	}
 
 	/**
@@ -164,25 +165,25 @@ class ListTable extends WP_List_Table {
 	 * @return string[]
 	 */
 	public function get_hideable_columns(): array {
-		// Hideable columns + their default-hidden state. Username is
-		// hidden by default (forensics admins toggle it on); Role is
-		// visible by default (most "who logged in?" investigations
-		// want it at a glance).
-		return [ 'username', 'ip', 'country', 'device', 'role' ];
+		// Username is the primary identifier column; not hideable.
+		// Name + Role + IP + Country + Device are all toggleable via
+		// Screen Options. Date is required (anchors the sort).
+		return [ 'name', 'role', 'ip', 'country', 'device' ];
 	}
 
 	/**
 	 * Columns hidden by default for fresh users (no saved Screen
 	 * Options state yet). WP merges this with the user's saved
 	 * preferences via the `default_hidden_columns` filter hook,
-	 * which we wire from ActivityPage.
+	 * which we wire from ActivityPage. Empty here — every column
+	 * ships visible; admins opt into hiding via Screen Options.
 	 *
 	 * @since 2.0.0
 	 *
 	 * @return string[]
 	 */
 	public static function get_default_hidden_columns(): array {
-		return [ 'username' ];
+		return [];
 	}
 
 	/**
@@ -220,12 +221,13 @@ class ListTable extends WP_List_Table {
 	 */
 	public function get_sortable_columns(): array {
 		return [
-			'when'    => [ 'date_created', true ],   // default-desc
-			'user'    => [ 'user_id', false ],
-			'event'   => [ 'event_type', false ],
-			'ip'      => [ 'ip_address', false ],
-			'country' => [ 'country_code', false ],
-			'role'    => [ 'user_role', false ],
+			'date'     => [ 'date_created', true ],   // default-desc
+			'username' => [ 'identifier', false ],
+			'name'     => [ 'user_id', false ],
+			'event'    => [ 'event_type', false ],
+			'ip'       => [ 'ip_address', false ],
+			'country'  => [ 'country_code', false ],
+			'role'     => [ 'user_role', false ],
 		];
 	}
 
@@ -551,7 +553,7 @@ class ListTable extends WP_List_Table {
 	 * @return string
 	 */
 	protected function get_default_primary_column_name(): string {
-		return $this->compact ? 'when' : 'user';
+		return $this->compact ? 'date' : 'username';
 	}
 
 	/**
@@ -572,7 +574,21 @@ class ListTable extends WP_List_Table {
 	 * @return void
 	 */
 	public function single_row( $item ): void {
-		$classes = [];
+		// Manual zebra striping. WP's `striped` class uses
+		// `tr:nth-child(odd)`, which counts EVERY child including the
+		// hidden detail rows we inject between data rows — that
+		// throws the alternation off and ends up colouring every
+		// data row the same. We toggle a class ourselves and override
+		// WP's selector via inline CSS so the alternation tracks
+		// data rows only.
+		static $stripe_index = 0;
+		$stripe_index++;
+
+		$classes = [ 'wpla-data-row' ];
+
+		if ( $stripe_index % 2 === 0 ) {
+			$classes[] = 'wpla-alt';
+		}
 
 		if ( $item->is_current_session() ) {
 			$classes[] = 'wpla-current-session';
@@ -772,7 +788,7 @@ class ListTable extends WP_List_Table {
 	 *
 	 * @return string
 	 */
-	public function column_when( ActivityRow $row ): string {
+	public function column_date( ActivityRow $row ): string {
 		if ( $row->date_created === '' || $row->date_created === '0000-00-00 00:00:00' ) {
 			return '—';
 		}
@@ -787,22 +803,39 @@ class ListTable extends WP_List_Table {
 			$relative = get_user_meta( get_current_user_id(), self::RELATIVE_TIME_OPTION, true ) === '1';
 		}
 
-		if ( $relative ) {
-			$ts = strtotime( $row->date_created . ' UTC' );
-			if ( $ts ) {
-				return sprintf(
-					/* translators: %s: human-readable time difference (e.g. "2 hours") */
-					esc_html__( '%s ago', 'wp-login-activity' ),
-					esc_html( human_time_diff( $ts, time() ) )
-				);
-			}
+		// All stored timestamps are UTC.
+		$ts = strtotime( $row->date_created . ' UTC' );
+		if ( ! $ts ) {
+			return esc_html( $row->date_created );
 		}
 
-		return esc_html( $row->date_created . ' UTC' );
+		if ( $relative ) {
+			return sprintf(
+				/* translators: %s: human-readable time difference (e.g. "2 hours") */
+				esc_html__( '%s ago', 'wp-login-activity' ),
+				esc_html( human_time_diff( $ts, time() ) )
+			);
+		}
+
+		// Match WP core's Posts/Pages list-table date format:
+		// "2026/02/16 at 3:58 pm". The format strings are translatable
+		// because some locales sort date components differently
+		// (e.g. d/m/Y in many EU locales). `wp_date()` handles the
+		// site-timezone conversion AND the i18n weekday/month names.
+		return sprintf(
+			/* translators: 1: date in Y/m/d format, 2: time in g:i a format */
+			esc_html__( '%1$s at %2$s', 'wp-login-activity' ),
+			esc_html( wp_date( __( 'Y/m/d', 'wp-login-activity' ), $ts ) ),
+			esc_html( wp_date( __( 'g:i a', 'wp-login-activity' ), $ts ) )
+		);
 	}
 
 	/**
-	 * "User" column.
+	 * "Username" column — the literal user_login string with the
+	 * user's avatar prefixed, matching WP core's Users-list-table
+	 * primary column. For unresolved rows (failed-login attempts on
+	 * non-existent users), shows whatever the visitor typed in
+	 * monospace so admins can spot scripted attempts at a glance.
 	 *
 	 * @since 2.0.0
 	 *
@@ -810,18 +843,52 @@ class ListTable extends WP_List_Table {
 	 *
 	 * @return string
 	 */
-	public function column_user( ActivityRow $row ): string {
-		$display = esc_html( $row->get_display_name() );
-
+	public function column_username( ActivityRow $row ): string {
 		if ( $row->user_id > 0 ) {
-			return sprintf(
-				'<a href="%s">%s</a>',
-				esc_url( get_edit_user_link( $row->user_id ) ),
-				$display
-			);
+			$user = get_userdata( $row->user_id );
+			if ( $user ) {
+				$avatar = get_avatar( $row->user_id, 32 );
+				$link   = sprintf(
+					'<strong><a href="%s">%s</a></strong>',
+					esc_url( get_edit_user_link( $row->user_id ) ),
+					esc_html( (string) $user->user_login )
+				);
+
+				return $avatar . ' ' . $link;
+			}
 		}
 
-		return $display;
+		// Unresolved row — show the typed identifier in monospace.
+		// No avatar (we don't know the user) and no link.
+		return $row->identifier !== ''
+			? '<code>' . esc_html( $row->identifier ) . '</code>'
+			: '—';
+	}
+
+	/**
+	 * "Name" column — the user's display_name, mirroring WP core's
+	 * Users-list-table second column. Linked to the edit-user screen
+	 * the same way Username is.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row Row.
+	 *
+	 * @return string
+	 */
+	public function column_name( ActivityRow $row ): string {
+		if ( $row->user_id > 0 ) {
+			$user = get_userdata( $row->user_id );
+			if ( $user ) {
+				return sprintf(
+					'<a href="%s">%s</a>',
+					esc_url( get_edit_user_link( $row->user_id ) ),
+					esc_html( (string) $user->display_name )
+				);
+			}
+		}
+
+		return '—';
 	}
 
 	/**
@@ -878,36 +945,6 @@ class ListTable extends WP_List_Table {
 		];
 
 		return $palette[ $event_type ] ?? [ '#e9eaee', '#50575e' ];
-	}
-
-	/**
-	 * "Username" column — the literal user_login string. Hidden by
-	 * default (most admins think in display names); forensic admins
-	 * toggle it on via Screen Options.
-	 *
-	 * For unresolved rows (failed-login attempts on bogus usernames),
-	 * shows whatever the visitor typed via `identifier`.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param ActivityRow $row Row.
-	 *
-	 * @return string
-	 */
-	public function column_username( ActivityRow $row ): string {
-		if ( $row->user_id > 0 ) {
-			$user = get_userdata( $row->user_id );
-			if ( $user ) {
-				return '<code>' . esc_html( (string) $user->user_login ) . '</code>';
-			}
-		}
-
-		// Unresolved row — use the typed identifier (which may be
-		// what a failed-login attacker typed; admins want to see that
-		// raw, in monospace, to help spot scripted attempts).
-		return $row->identifier !== ''
-			? '<code>' . esc_html( $row->identifier ) . '</code>'
-			: '—';
 	}
 
 	/**
