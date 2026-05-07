@@ -54,8 +54,14 @@ class Logger {
 	 * @since 2.0.0
 	 */
 	public function __construct() {
+		// `wp_login_failed` fires with 2 args since WP 5.4 (username +
+		// the WP_Error). We accept both even though we only use the
+		// username — registering args=1 in strict-types mode means
+		// PHP type-coerces any unexpected input shape, and silent
+		// hook-handler exceptions in WP get swallowed before they
+		// reach error_log on most setups.
 		add_action( 'wp_login',        [ $this, 'on_login' ], 10, 2 );
-		add_action( 'wp_login_failed', [ $this, 'on_login_failed' ], 10, 1 );
+		add_action( 'wp_login_failed', [ $this, 'on_login_failed' ], 10, 2 );
 		add_action( 'wp_logout',       [ $this, 'on_logout' ], 10, 1 );
 		add_action( 'user_register',   [ $this, 'on_user_register' ], 10, 1 );
 		add_action( 'profile_update',  [ $this, 'on_profile_update' ], 10, 2 );
@@ -64,40 +70,61 @@ class Logger {
 	}
 
 	/**
+	 * Hook-handler signatures intentionally take untyped parameters
+	 * and cast/validate inside the body.
+	 *
+	 * Why: this file is `declare(strict_types=1)`, which combined with
+	 * `string`/`int` parameter type hints means PHP throws TypeError
+	 * if WP passes anything unexpected (null, mixed-type, etc.). WP's
+	 * `do_action` doesn't propagate handler exceptions in a visible
+	 * way — the error gets swallowed and the row never logs, with no
+	 * obvious symptom for the admin to debug. Defensive casting inside
+	 * the handler keeps the recording path resilient to whatever shape
+	 * the action is fired with (now or in a future WP release).
+	 */
+
+	/**
 	 * Successful login.
 	 *
 	 * @since 2.0.0
 	 *
-	 * @param string  $user_login Login name (username).
-	 * @param WP_User $user       The authenticated user.
+	 * @param mixed $user_login Login name (username) — usually a string.
+	 * @param mixed $user       The authenticated user — usually WP_User.
 	 *
 	 * @return void
 	 */
-	public function on_login( string $user_login, WP_User $user ): void {
-		$this->record( 'login', (int) $user->ID, $user_login );
+	public function on_login( $user_login, $user ): void {
+		$user_id    = $user instanceof WP_User ? (int) $user->ID : 0;
+		$identifier = is_string( $user_login ) ? $user_login : '';
+
+		$this->record( 'login', $user_id, $identifier );
 	}
 
 	/**
 	 * Failed login.
 	 *
-	 * `wp_login_failed` fires with whatever the visitor typed — could
-	 * be a username, an email, or garbage. We resolve to a user_id
-	 * when possible (real account that got the wrong password) so
-	 * "failed logins for user X" reports work; we fall back to
-	 * recording just the identifier when no such account exists.
+	 * `wp_login_failed` fires (since WP 5.4) with the typed username
+	 * AND a WP_Error describing the failure. We only use the username
+	 * but accept both args so the registration matches WP's signature
+	 * exactly.
 	 *
 	 * @since 2.0.0
 	 *
-	 * @param string $username The submitted username/email.
+	 * @param mixed $username The submitted username/email.
+	 * @param mixed $error    WP_Error with the failure details (unused).
 	 *
 	 * @return void
 	 */
-	public function on_login_failed( string $username ): void {
+	public function on_login_failed( $username, $error = null ): void {
 		if ( ! get_option( 'wp_login_activity_log_failed_logins', 1 ) ) {
 			return;
 		}
 
-		$user    = get_user_by( 'login', $username ) ?: get_user_by( 'email', $username );
+		$username = is_string( $username ) ? $username : '';
+
+		$user    = $username !== ''
+			? ( get_user_by( 'login', $username ) ?: get_user_by( 'email', $username ) )
+			: false;
 		$user_id = $user instanceof WP_User ? (int) $user->ID : 0;
 
 		$this->record( 'login_failed', $user_id, $username );
@@ -108,16 +135,17 @@ class Logger {
 	 *
 	 * @since 2.0.0
 	 *
-	 * @param int $user_id The user that logged out.
+	 * @param mixed $user_id The user that logged out.
 	 *
 	 * @return void
 	 */
-	public function on_logout( int $user_id ): void {
+	public function on_logout( $user_id ): void {
 		if ( ! get_option( 'wp_login_activity_log_logouts', 1 ) ) {
 			return;
 		}
 
-		$user       = get_userdata( $user_id );
+		$user_id    = (int) $user_id;
+		$user       = $user_id > 0 ? get_userdata( $user_id ) : false;
 		$identifier = $user ? (string) $user->user_login : '';
 
 		$this->record( 'logout', $user_id, $identifier );
@@ -128,16 +156,17 @@ class Logger {
 	 *
 	 * @since 2.0.0
 	 *
-	 * @param int $user_id The new user's ID.
+	 * @param mixed $user_id The new user's ID.
 	 *
 	 * @return void
 	 */
-	public function on_user_register( int $user_id ): void {
+	public function on_user_register( $user_id ): void {
 		if ( ! get_option( 'wp_login_activity_log_registrations', 1 ) ) {
 			return;
 		}
 
-		$user       = get_userdata( $user_id );
+		$user_id    = (int) $user_id;
+		$user       = $user_id > 0 ? get_userdata( $user_id ) : false;
 		$identifier = $user ? (string) $user->user_login : '';
 
 		$this->record( 'registered', $user_id, $identifier );
@@ -145,27 +174,21 @@ class Logger {
 
 	/**
 	 * Profile updated — diff against the pre-update user data to log
-	 * only meaningful changes.
-	 *
-	 * `profile_update` fires on every profile edit (display name, bio,
-	 * URL, etc.). We don't want to log cosmetic changes — we want the
-	 * security-relevant ones: password rotation and email-address
-	 * changes. Each is gated by its own settings toggle and emits its
-	 * own event slug so the admin filter can show one without the
-	 * other.
-	 *
-	 * Both can fire from the same profile-edit save (admin changes
-	 * password AND email at once); both rows are written.
+	 * only meaningful changes (password rotation, email change). Each
+	 * change is gated by its own settings toggle and emits its own
+	 * event slug; both can fire from the same save (admin changes
+	 * password AND email at once).
 	 *
 	 * @since 2.0.0
 	 *
-	 * @param int      $user_id       The user that was updated.
-	 * @param \WP_User $old_user_data The user object pre-update.
+	 * @param mixed $user_id       The user that was updated.
+	 * @param mixed $old_user_data Pre-update user object (WP_User).
 	 *
 	 * @return void
 	 */
-	public function on_profile_update( int $user_id, $old_user_data ): void {
-		if ( ! is_object( $old_user_data ) ) {
+	public function on_profile_update( $user_id, $old_user_data ): void {
+		$user_id = (int) $user_id;
+		if ( $user_id <= 0 || ! is_object( $old_user_data ) ) {
 			return;
 		}
 
@@ -192,9 +215,9 @@ class Logger {
 			&& isset( $old_user_data->user_email )
 			&& strtolower( (string) $current->user_email ) !== strtolower( (string) $old_user_data->user_email )
 		) {
-			// Identifier captures the OLD email so the admin alert
-			// can surface "user X switched from foo@old to bar@new"
-			// without joining tables. Format: "old → new".
+			// Identifier captures the OLD → NEW email transition so
+			// the admin alert can surface "user X switched from
+			// foo@old to bar@new" without joining tables.
 			$identifier = sprintf( '%s → %s', $old_user_data->user_email, $current->user_email );
 			$this->record( 'email_changed', $user_id, $identifier );
 		}
@@ -205,7 +228,7 @@ class Logger {
 	 *
 	 * @since 2.0.0
 	 *
-	 * @param \WP_User|object $user The user whose password was reset.
+	 * @param mixed $user The user whose password was reset (WP_User).
 	 *
 	 * @return void
 	 */
@@ -235,25 +258,23 @@ class Logger {
 	 * "existing user promoted to admin" (old_roles non-empty). Both
 	 * routes carry the same threat profile — an unexpected admin
 	 * appearing on the site — so we collapse them into a single
-	 * `admin_assigned` event slug. The receiving alert listener can
-	 * still differentiate from the row's `identifier` if needed.
-	 *
-	 * Fires on `set_user_role` rather than `add_user_role` because
-	 * `wp_insert_user` calls set_user_role for the initial role too,
-	 * giving us full coverage with one hook.
+	 * `admin_assigned` event slug.
 	 *
 	 * @since 2.0.0
 	 *
-	 * @param int      $user_id   The user being assigned the role.
-	 * @param string   $role      The role slug being set.
-	 * @param string[] $old_roles Roles the user had before the change.
+	 * @param mixed $user_id   The user being assigned the role.
+	 * @param mixed $role      The role slug being set.
+	 * @param mixed $old_roles Roles the user had before the change.
 	 *
 	 * @return void
 	 */
-	public function on_set_user_role( int $user_id, string $role, array $old_roles ): void {
+	public function on_set_user_role( $user_id, $role, $old_roles = [] ): void {
+		$role = is_string( $role ) ? $role : '';
 		if ( $role !== 'administrator' ) {
 			return;
 		}
+
+		$old_roles = is_array( $old_roles ) ? $old_roles : [];
 
 		// Skip if they were ALREADY an admin — a no-op role-set on the
 		// same admin user shouldn't generate noise (e.g. profile saves
@@ -262,7 +283,8 @@ class Logger {
 			return;
 		}
 
-		$user       = get_userdata( $user_id );
+		$user_id    = (int) $user_id;
+		$user       = $user_id > 0 ? get_userdata( $user_id ) : false;
 		$identifier = $user ? (string) $user->user_login : '';
 
 		$this->record( 'admin_assigned', $user_id, $identifier );
