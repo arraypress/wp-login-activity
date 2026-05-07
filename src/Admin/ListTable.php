@@ -158,6 +158,8 @@ class ListTable extends WP_List_Table {
 			'ip'       => __( 'IP',       'wp-login-activity' ),
 			'country'  => __( 'Country',  'wp-login-activity' ),
 			'device'   => __( 'Device',   'wp-login-activity' ),
+			'language' => __( 'Language', 'wp-login-activity' ),
+			'referer'  => __( 'Referer',  'wp-login-activity' ),
 			'date'     => __( 'Date',     'wp-login-activity' ),
 		];
 	}
@@ -173,24 +175,28 @@ class ListTable extends WP_List_Table {
 	 */
 	public function get_hideable_columns(): array {
 		// Username is the primary identifier column; not hideable.
-		// Name + Role + IP + Country + Device are all toggleable via
-		// Screen Options. Date is required (anchors the sort).
-		return [ 'name', 'role', 'ip', 'country', 'device' ];
+		// Date anchors the sort (also not hideable). Everything else
+		// is toggleable via Screen Options.
+		return [ 'name', 'role', 'ip', 'country', 'device', 'language', 'referer' ];
 	}
 
 	/**
 	 * Columns hidden by default for fresh users (no saved Screen
 	 * Options state yet). WP merges this with the user's saved
 	 * preferences via the `default_hidden_columns` filter hook,
-	 * which we wire from ActivityPage. Empty here — every column
-	 * ships visible; admins opt into hiding via Screen Options.
+	 * which we wire from ActivityPage.
+	 *
+	 * Language + Referer ship hidden because they're forensic-detail
+	 * columns useful in specific investigations but not at-a-glance.
+	 * Admins opt into showing them via Screen Options when needed,
+	 * and the detail row already exposes them.
 	 *
 	 * @since 2.0.0
 	 *
 	 * @return string[]
 	 */
 	public static function get_default_hidden_columns(): array {
-		return [];
+		return [ 'language', 'referer' ];
 	}
 
 	/**
@@ -757,6 +763,10 @@ class ListTable extends WP_List_Table {
 			$pairs[ __( 'Referer', 'wp-login-activity' ) ] = $row->referer;
 		}
 
+		if ( $row->accept_language !== '' ) {
+			$pairs[ __( 'Accept-Language', 'wp-login-activity' ) ] = $row->accept_language;
+		}
+
 		if ( $row->has_distinct_actor() ) {
 			$pairs[ __( 'Performed by', 'wp-login-activity' ) ] = $row->get_actor_display_name();
 		}
@@ -1293,6 +1303,61 @@ class ListTable extends WP_List_Table {
 		}
 
 		return $value;
+	}
+
+	/**
+	 * "Language" column — renders just the primary language tag
+	 * (e.g. "en-GB"). The full Accept-Language string is in the
+	 * detail row + CSV export. The cell is `<code>`-styled so an
+	 * unfamiliar tag stands out against neighbouring rows where
+	 * everyone else has the same locale.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row Row.
+	 *
+	 * @return string
+	 */
+	public function column_language( ActivityRow $row ): string {
+		$primary = $row->get_primary_language();
+
+		return $primary !== ''
+			? '<code>' . esc_html( $primary ) . '</code>'
+			: '—';
+	}
+
+	/**
+	 * "Referer" column — the HTTP_REFERER captured at request time.
+	 *
+	 * Most logins go via the wp-login.php form so the column is
+	 * homogeneous-looking until something stands out (an API request
+	 * that hit auth without going through the login page, an unusual
+	 * referrer domain, etc.). Truncated for readability in-cell;
+	 * the full URL is in the detail row.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row Row.
+	 *
+	 * @return string
+	 */
+	public function column_referer( ActivityRow $row ): string {
+		if ( $row->referer === '' ) {
+			return '—';
+		}
+
+		// Show host + first ~30 chars of path; full URL on hover and
+		// in the detail row.
+		$short = $row->referer;
+		if ( mb_strlen( $short ) > 50 ) {
+			$short = mb_substr( $short, 0, 47 ) . '…';
+		}
+
+		return sprintf(
+			'<span title="%s">%s</span>',
+			esc_attr( $row->referer ),
+			esc_html( $short )
+		);
 	}
 
 	/**

@@ -39,6 +39,7 @@ use ArrayPress\IPUtils\IP;
  * @property int    $actor_user_id
  * @property string $user_role
  * @property string $session_token_hash
+ * @property string $accept_language
  * @property int    $is_new_country
  * @property string $date_created
  * @property string $uuid
@@ -69,6 +70,7 @@ class Activity extends Row {
 		$this->actor_user_id  = (int) ( $this->actor_user_id ?? 0 );
 		$this->user_role           = (string) ( $this->user_role ?? '' );
 		$this->session_token_hash  = (string) ( $this->session_token_hash ?? '' );
+		$this->accept_language     = (string) ( $this->accept_language ?? '' );
 		$this->is_new_country = (int) ( $this->is_new_country ?? 0 );
 		$this->date_created   = (string) ( $this->date_created ?? '' );
 		$this->uuid           = (string) ( $this->uuid ?? '' );
@@ -221,6 +223,36 @@ class Activity extends Row {
 		}
 
 		return (string) ( IP::anonymize( $this->ip_address ) ?? $this->ip_address );
+	}
+
+	/**
+	 * Primary language tag — the first entry from the stored
+	 * Accept-Language header. Useful for the column display where
+	 * the full quality-weighted string would be too long; the raw
+	 * value stays accessible via $this->accept_language for
+	 * forensics work.
+	 *
+	 * Examples:
+	 *   "en-GB,en;q=0.9,fr;q=0.8" → "en-GB"
+	 *   "ru-RU,ru;q=0.9,en;q=0.8" → "ru-RU"
+	 *   ""                        → ""
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	public function get_primary_language(): string {
+		if ( $this->accept_language === '' ) {
+			return '';
+		}
+
+		// Split on comma, take first; strip the optional q-weight
+		// after a semicolon. trim() catches any whitespace WP-style
+		// header parsers might have allowed through.
+		$first = trim( explode( ',', $this->accept_language )[0] );
+		$first = trim( explode( ';', $first )[0] );
+
+		return $first;
 	}
 
 	/* -------------------------------------------------------------------

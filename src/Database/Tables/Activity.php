@@ -49,7 +49,7 @@ final class Activity extends Table {
 	 * @since 2.0.0
 	 * @var   int
 	 */
-	protected $version = 202605080;
+	protected $version = 202605090;
 
 	/**
 	 * Map of registered upgrades. BerlinDB walks this on every load
@@ -60,6 +60,7 @@ final class Activity extends Table {
 	 */
 	protected $upgrades = [
 		'202605080' => 202605080,
+		'202605090' => 202605090,
 	];
 
 	/**
@@ -81,6 +82,7 @@ final class Activity extends Table {
 			actor_user_id bigint(20) unsigned NOT NULL default '0',
 			user_role varchar(50) NOT NULL default '',
 			session_token_hash varchar(64) NOT NULL default '',
+			accept_language varchar(100) NOT NULL default '',
 			is_new_country tinyint(1) unsigned NOT NULL default '0',
 			date_created datetime NOT NULL default '0000-00-00 00:00:00',
 			uuid varchar(100) NOT NULL default '',
@@ -147,6 +149,29 @@ final class Activity extends Table {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Upgrade to 202605090 — add `accept_language` column.
+	 *
+	 * Existing rows get an empty default. Not indexed because the
+	 * column is forensic-detail-only (rendered in the detail view
+	 * + CSV export); no query path filters or sorts on it.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return bool
+	 */
+	protected function __202605090(): bool {
+		global $wpdb;
+
+		if ( $this->column_exists( 'accept_language' ) ) {
+			return true;
+		}
+
+		return $this->is_success(
+			$wpdb->query( "ALTER TABLE {$this->table_name} ADD COLUMN accept_language varchar(100) NOT NULL default '' AFTER session_token_hash" )
+		);
 	}
 
 }

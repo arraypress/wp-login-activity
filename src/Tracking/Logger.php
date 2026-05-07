@@ -295,6 +295,7 @@ class Logger {
 			'actor_user_id'      => $this->resolve_actor_user_id( $user_id, $event_type ),
 			'user_role'          => $this->resolve_subject_role( $user_id ),
 			'session_token_hash' => $this->resolve_session_token_hash( $event_type ),
+			'accept_language'    => $this->resolve_accept_language(),
 			'is_new_country'     => $this->is_first_time_country( $user_id, $country['code'] ) ? 1 : 0,
 			'date_created'       => current_time( 'mysql', true ),
 		];
@@ -558,6 +559,33 @@ class Logger {
 		}
 
 		return (string) reset( $user->roles );
+	}
+
+	/**
+	 * Capture the visitor's Accept-Language header.
+	 *
+	 * Stored RAW so future parser logic can derive richer signals
+	 * from historical rows. Capped at 100 chars (matches the column
+	 * size) — typical real-world values are under 80; the cap is
+	 * defence against poison data.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	private function resolve_accept_language(): string {
+		if ( empty( $_SERVER['HTTP_ACCEPT_LANGUAGE'] ) ) {
+			return '';
+		}
+
+		$lang = wp_check_invalid_utf8( (string) $_SERVER['HTTP_ACCEPT_LANGUAGE'] );
+
+		// Strip control characters / newlines defensively. The header
+		// field shouldn't contain them, but a malicious client can
+		// set anything.
+		$lang = preg_replace( '/[\x00-\x1F\x7F]/', '', (string) $lang );
+
+		return mb_substr( (string) $lang, 0, 100 );
 	}
 
 	/**

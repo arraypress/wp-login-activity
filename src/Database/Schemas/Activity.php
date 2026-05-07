@@ -183,6 +183,23 @@ class Activity extends Schema {
 			'default' => '',
 		],
 
+		// Accept-Language header — the browser's advertised language
+		// preferences at request time, e.g. "en-GB,en;q=0.9,fr;q=0.8".
+		// Forensically valuable as a SECONDARY identity signal: if
+		// a user's typical Accept-Language is en-GB and a login
+		// suddenly arrives with ru-RU, that's a strong "different
+		// person on this account" indicator even when IP + country
+		// happen to match (e.g. VPN exit in the user's home country).
+		// Stored RAW for the same reason we store raw user_agent —
+		// future parser improvements can derive richer signals from
+		// historical rows.
+		[
+			'name'    => 'accept_language',
+			'type'    => 'varchar',
+			'length'  => '100',
+			'default' => '',
+		],
+
 		// Boolean flag set at write time when the (user_id, country_code)
 		// pair has not been seen before. Pre-computed instead of derived
 		// at read time so the new-country email + admin "new" badge are

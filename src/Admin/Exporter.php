@@ -231,6 +231,7 @@ class Exporter {
 			'is_new_country',
 			'actor_user_id',
 			'referer',
+			'accept_language',
 			'user_agent_raw',
 			'uuid',
 		] );
@@ -301,6 +302,7 @@ class Exporter {
 			(string) $row->is_new_country,
 			(string) $row->actor_user_id,
 			(string) $row->referer,
+			(string) $row->accept_language,
 			(string) $row->user_agent,
 			(string) $row->uuid,
 		];
