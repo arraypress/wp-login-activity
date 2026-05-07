@@ -65,6 +65,26 @@ class AdminAssignedAlert {
 			return;
 		}
 
+		/**
+		 * Filter whether an alert email should actually be sent for
+		 * this row. Lets plugins suppress alerts in maintenance
+		 * windows, during scripted rollouts, when forwarding to a
+		 * SIEM that already covers the channel, etc.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param bool         $send       Default true.
+		 * @param string       $alert_type Slug — one of: new_location,
+		 *                                 admin_assigned,
+		 *                                 admin_password_changed,
+		 *                                 admin_email_changed,
+		 *                                 failed_login_burst.
+		 * @param ActivityRow  $row        Row context.
+		 */
+		if ( ! apply_filters( 'wp_login_activity_should_send_alert', true, 'admin_assigned', $row ) ) {
+			return;
+		}
+
 		// Exclude the just-promoted user from the recipient list — they
 		// shouldn't be the first to know they're suspected, and if the
 		// account is attacker-controlled the attacker gets a "your

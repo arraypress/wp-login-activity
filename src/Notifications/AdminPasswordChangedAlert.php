@@ -64,6 +64,11 @@ class AdminPasswordChangedAlert {
 			return;
 		}
 
+		/** This filter is documented in src/Notifications/AdminAssignedAlert.php */
+		if ( ! apply_filters( 'wp_login_activity_should_send_alert', true, 'admin_password_changed', $row ) ) {
+			return;
+		}
+
 		// Gate on admin capability — skip ordinary subscriber password
 		// changes. Use user_can() rather than checking the role list
 		// directly because some sites grant `manage_options` outside

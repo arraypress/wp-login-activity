@@ -57,7 +57,20 @@ class Recipients {
 			}
 		}
 
-		return array_values( array_unique( array_filter( $recipients ) ) );
+		$recipients = array_values( array_unique( array_filter( $recipients ) ) );
+
+		/**
+		 * Filter the per-user-alert recipient list.
+		 *
+		 * Lets integrators add a SIEM ingest address, route based on
+		 * the alert type, or drop recipients entirely.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param string[] $recipients Default recipient list.
+		 * @param string   $context    'user' — the recipient model.
+		 */
+		return (array) apply_filters( 'wp_login_activity_alert_recipients', $recipients, 'user' );
 	}
 
 	/**
@@ -104,7 +117,10 @@ class Recipients {
 			}
 		}
 
-		return array_values( array_unique( array_filter( $recipients ) ) );
+		$recipients = array_values( array_unique( array_filter( $recipients ) ) );
+
+		/** This filter is documented in src/Notifications/Recipients.php */
+		return (array) apply_filters( 'wp_login_activity_alert_recipients', $recipients, 'admins' );
 	}
 
 }

@@ -554,6 +554,20 @@ class ListTable extends WP_List_Table {
 			esc_html__( 'Delete', 'wp-login-activity' )
 		);
 
+		/**
+		 * Filter the per-row action links.
+		 *
+		 * Plugins can add their own actions ("Send to Slack",
+		 * "Block this IP at the firewall") by appending to the array.
+		 * Each value should be a fully-formed `<a>` tag.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param array<string, string> $actions Slug => HTML link.
+		 * @param ActivityRow           $row     Row context.
+		 */
+		$actions = (array) apply_filters( 'wp_login_activity_row_actions', $actions, $row );
+
 		return $this->row_actions( $actions );
 	}
 
@@ -675,6 +689,22 @@ class ListTable extends WP_List_Table {
 		}
 
 		$pairs[ __( 'UUID', 'wp-login-activity' ) ] = $row->uuid !== '' ? $row->uuid : '—';
+
+		/**
+		 * Filter the detail-row key/value pairs.
+		 *
+		 * Plugins extending the activity log with their own metadata
+		 * (custom row columns, third-party enrichment) can append to
+		 * the pairs array to surface that data inside the expanded
+		 * detail view. Both keys and values are escaped at render
+		 * time so plain strings are safe to add.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param array<string, string> $pairs Label => value.
+		 * @param ActivityRow           $row   Row context.
+		 */
+		$pairs = (array) apply_filters( 'wp_login_activity_detail_pairs', $pairs, $row );
 
 		?>
 		<tr id="wpla-detail-<?php echo (int) $row->id; ?>" class="wpla-detail-row" hidden>
@@ -950,6 +980,20 @@ class ListTable extends WP_List_Table {
 			'admin_assigned'   => [ '#fcd5d5', '#7f1d1d' ],  // red (deeper)
 		];
 
+		/**
+		 * Filter the event-badge colour palette.
+		 *
+		 * Plugins registering custom event types can extend this
+		 * palette by adding their own slug => [bg, fg] entry. Returning
+		 * a tuple for an existing slug overrides the default.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param array<string, array{0:string,1:string}> $palette Slug => [bg, fg].
+		 * @param string                                  $event_type The slug being rendered.
+		 */
+		$palette = (array) apply_filters( 'wp_login_activity_event_colours', $palette, $event_type );
+
 		return $palette[ $event_type ] ?? [ '#e9eaee', '#50575e' ];
 	}
 
@@ -1098,6 +1142,22 @@ class ListTable extends WP_List_Table {
 			'email_changed'     => __( 'Email changed',          'wp-login-activity' ),
 			'admin_assigned'    => __( 'Admin role assigned',    'wp-login-activity' ),
 		];
+
+		/**
+		 * Filter the event-type display labels.
+		 *
+		 * Plugins that emit custom event types via the
+		 * `wp_login_activity_pre_insert_data` filter (or by inserting
+		 * directly via Plugin::query()->add_item()) can register the
+		 * display label here so the list table renders them with a
+		 * human-friendly string instead of the raw slug.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param array<string, string> $labels    Slug => translated label.
+		 * @param string                $event_type Slug being rendered.
+		 */
+		$labels = (array) apply_filters( 'wp_login_activity_event_labels', $labels, $event_type );
 
 		return $labels[ $event_type ] ?? $event_type;
 	}

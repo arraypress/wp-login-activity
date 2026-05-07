@@ -62,6 +62,11 @@ class AdminEmailChangedAlert {
 			return;
 		}
 
+		/** This filter is documented in src/Notifications/AdminAssignedAlert.php */
+		if ( ! apply_filters( 'wp_login_activity_should_send_alert', true, 'admin_email_changed', $row ) ) {
+			return;
+		}
+
 		if ( $row->user_id <= 0 || ! user_can( $row->user_id, 'manage_options' ) ) {
 			return;
 		}

@@ -77,6 +77,11 @@ class NewLocationAlert {
 			return;
 		}
 
+		/** This filter is documented in src/Notifications/NewLocationAlert.php */
+		if ( ! apply_filters( 'wp_login_activity_should_send_alert', true, 'new_location', $row ) ) {
+			return;
+		}
+
 		$user = get_userdata( $row->user_id );
 		if ( ! $user ) {
 			return;

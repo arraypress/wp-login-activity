@@ -283,7 +283,7 @@ class Logger {
 		$ip      = $this->resolve_ip();
 		$country = $this->resolve_country();
 
-		$row_id = Plugin::query()->add_item( [
+		$data = [
 			'user_id'            => $user_id,
 			'identifier'         => $identifier,
 			'event_type'         => $event_type,
@@ -297,7 +297,32 @@ class Logger {
 			'session_token_hash' => $this->resolve_session_token_hash( $event_type ),
 			'is_new_country'     => $this->is_first_time_country( $user_id, $country['code'] ) ? 1 : 0,
 			'date_created'       => current_time( 'mysql', true ),
-		] );
+		];
+
+		/**
+		 * Filter the row data before insert.
+		 *
+		 * Return an array to mutate the row (e.g. add a custom field
+		 * to a meta column, redact the user_agent for a privacy-strict
+		 * site). Return `false` from this filter to skip writing the
+		 * row entirely — useful for "don't log MY logins" rules,
+		 * maintenance windows, or capping ingest rate during
+		 * brute-force events.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param array|false $data        Row data, or false to skip insert.
+		 * @param string      $event_type  Event slug.
+		 * @param int         $user_id     Subject user ID (0 if unresolved).
+		 * @param string      $identifier  Free-text identifier captured from the request.
+		 */
+		$data = apply_filters( 'wp_login_activity_pre_insert_data', $data, $event_type, $user_id, $identifier );
+
+		if ( $data === false || ! is_array( $data ) ) {
+			return;
+		}
+
+		$row_id = Plugin::query()->add_item( $data );
 
 		if ( ! $row_id ) {
 			return;

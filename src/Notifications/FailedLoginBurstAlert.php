@@ -103,6 +103,11 @@ class FailedLoginBurstAlert {
 			return;
 		}
 
+		/** This filter is documented in src/Notifications/AdminAssignedAlert.php */
+		if ( ! apply_filters( 'wp_login_activity_should_send_alert', true, 'failed_login_burst', $row ) ) {
+			return;
+		}
+
 		// Dedupe — short-circuit if we've already alerted for this
 		// identifier within the dedupe TTL. Hash the key so an
 		// identifier with weird characters (UTF-8 emoji, spaces) still
