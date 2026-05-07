@@ -131,6 +131,58 @@ class Activity extends Schema {
 			'default' => '',
 		],
 
+		// HTTP_REFERER at the time of the event. Useful for spotting
+		// auth attempts that didn't come via the login form (direct
+		// API requests, bookmarks, suspicious referrers).
+		[
+			'name'    => 'referer',
+			'type'    => 'varchar',
+			'length'  => '500',
+			'default' => '',
+		],
+
+		// Actor — who PERFORMED the action vs `user_id` which is the
+		// SUBJECT. For self-actions (your own login, you change your
+		// own password) the two are equal. For admin-driven changes
+		// (Alice promotes Bob to admin) actor_user_id captures the
+		// initiating admin. Indexed so "what did this admin do today?"
+		// queries are fast.
+		[
+			'name'      => 'actor_user_id',
+			'type'      => 'bigint',
+			'length'    => '20',
+			'unsigned'  => true,
+			'default'   => '0',
+			'cache_key' => true,
+			'sortable'  => true,
+		],
+
+		// Snapshot of the subject user's primary role AT THE TIME of
+		// the event. Stored at write time so a later role change (or
+		// user deletion) doesn't rewrite history — "what role logged
+		// in?" stays answerable forever. Render uses the snapshot
+		// rather than a live get_userdata() lookup for the same reason.
+		[
+			'name'    => 'user_role',
+			'type'    => 'varchar',
+			'length'  => '50',
+			'default' => '',
+		],
+
+		// SHA-256 of the WP session token that authenticated this
+		// login event. Lets the admin/profile UI highlight "this is
+		// the session you're using right now" — matches against
+		// `wp_get_session_token()` of the current request. We hash
+		// rather than store raw because the raw token is a credential
+		// equivalent to a password — attacker DB read would let them
+		// hijack the session if stored plain.
+		[
+			'name'    => 'session_token_hash',
+			'type'    => 'varchar',
+			'length'  => '64',
+			'default' => '',
+		],
+
 		// Boolean flag set at write time when the (user_id, country_code)
 		// pair has not been seen before. Pre-computed instead of derived
 		// at read time so the new-country email + admin "new" badge are

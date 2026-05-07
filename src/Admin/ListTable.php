@@ -131,17 +131,19 @@ class ListTable extends WP_List_Table {
 		$columns = [];
 
 		// Compact mode (user-profile embed) skips the bulk-action
-		// checkbox AND the "User" column — the surrounding context
-		// already names the user, repeating it on every row would
-		// be visual noise.
+		// checkbox AND the "User" + "Username" + "Role" columns —
+		// the surrounding context already names the user, repeating
+		// that on every row would be visual noise.
 		if ( ! $this->compact ) {
-			$columns['cb']   = '<input type="checkbox" />';
+			$columns['cb']       = '<input type="checkbox" />';
 		}
 
 		$columns['when']  = __( 'When',  'wp-login-activity' );
 
 		if ( ! $this->compact ) {
-			$columns['user'] = __( 'User', 'wp-login-activity' );
+			$columns['user']     = __( 'User',     'wp-login-activity' );
+			$columns['username'] = __( 'Username', 'wp-login-activity' );
+			$columns['role']     = __( 'Role',     'wp-login-activity' );
 		}
 
 		$columns['event']   = __( 'Event',   'wp-login-activity' );
@@ -162,7 +164,25 @@ class ListTable extends WP_List_Table {
 	 * @return string[]
 	 */
 	public function get_hideable_columns(): array {
-		return [ 'ip', 'country', 'device' ];
+		// Hideable columns + their default-hidden state. Username is
+		// hidden by default (forensics admins toggle it on); Role is
+		// visible by default (most "who logged in?" investigations
+		// want it at a glance).
+		return [ 'username', 'ip', 'country', 'device', 'role' ];
+	}
+
+	/**
+	 * Columns hidden by default for fresh users (no saved Screen
+	 * Options state yet). WP merges this with the user's saved
+	 * preferences via the `default_hidden_columns` filter hook,
+	 * which we wire from ActivityPage.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string[]
+	 */
+	public static function get_default_hidden_columns(): array {
+		return [ 'username' ];
 	}
 
 	/**
@@ -205,6 +225,7 @@ class ListTable extends WP_List_Table {
 			'event'   => [ 'event_type', false ],
 			'ip'      => [ 'ip_address', false ],
 			'country' => [ 'country_code', false ],
+			'role'    => [ 'user_role', false ],
 		];
 	}
 
@@ -382,15 +403,50 @@ class ListTable extends WP_List_Table {
 	 * @return void
 	 */
 	private function process_bulk_action(): void {
-		if ( $this->current_action() !== 'delete' ) {
+		// Bulk-delete via the dropdown.
+		if ( $this->current_action() === 'delete' && ! empty( $_REQUEST['activity'] ) ) {
+			check_admin_referer( 'bulk-activities' );
+			$this->delete_rows( array_map( 'absint', (array) $_REQUEST['activity'] ) );
+
 			return;
 		}
 
-		check_admin_referer( 'bulk-activities' );
+		// Single-row delete via the row-action link
+		// (`?action=delete&activity=N&_wpnonce=...`).
+		if ( ! empty( $_REQUEST['action'] ) && $_REQUEST['action'] === 'delete' && ! empty( $_REQUEST['activity'] ) ) {
+			$id = absint( (string) $_REQUEST['activity'] );
+			if ( $id > 0 ) {
+				check_admin_referer( 'wpla_delete_' . $id );
+				$this->delete_rows( [ $id ] );
+			}
+		}
+	}
 
-		$ids = array_map( 'absint', (array) ( $_REQUEST['activity'] ?? [] ) );
+	/**
+	 * Delete a list of activity rows + emit the standard admin notice.
+	 *
+	 * Single point through which both bulk-delete and single-delete
+	 * flow so the capability gate and "rows actually deleted" notice
+	 * stay in one place.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param int[] $ids Row IDs to delete.
+	 *
+	 * @return void
+	 */
+	private function delete_rows( array $ids ): void {
+		// Cap-gate at the action layer too (the page render is gated
+		// already, but defence in depth is cheap). Note: an attacker
+		// with `manage_options` can wipe ANY plugin's data; preventing
+		// log-tampering at the plugin layer is at best raising-the-
+		// bar, not actual prevention. Forwarding to a write-once
+		// SIEM is the only real mitigation.
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
 		$ids = array_filter( $ids );
-
 		if ( empty( $ids ) ) {
 			return;
 		}
@@ -399,7 +455,7 @@ class ListTable extends WP_List_Table {
 		$deleted = 0;
 
 		foreach ( $ids as $id ) {
-			if ( $query->delete_item( $id ) ) {
+			if ( $query->delete_item( (int) $id ) ) {
 				$deleted++;
 			}
 		}
@@ -416,6 +472,191 @@ class ListTable extends WP_List_Table {
 				);
 			} );
 		}
+	}
+
+	/**
+	 * Per-row action links rendered below the primary column. The
+	 * primary column is "user" by default (or "when" in compact mode);
+	 * see `get_default_primary_column_name()`.
+	 *
+	 *   View details — JS-toggles the hidden detail row beneath
+	 *   Filter user — same page, scoped to this user
+	 *   Filter IP   — same page, scoped to this IP
+	 *   Delete      — single-row delete with nonce
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row         Row.
+	 * @param string      $column_name Column slug.
+	 * @param string      $primary     The primary column for this table.
+	 *
+	 * @return string
+	 */
+	protected function handle_row_actions( $row, $column_name, $primary ): string {
+		if ( $column_name !== $primary || $this->compact ) {
+			return '';
+		}
+
+		$base = admin_url( 'users.php?page=wp-login-activity' );
+
+		$actions = [];
+
+		$actions['view'] = sprintf(
+			'<a href="#" class="wpla-toggle-details" data-row-id="%d" aria-expanded="false">%s</a>',
+			(int) $row->id,
+			esc_html__( 'View details', 'wp-login-activity' )
+		);
+
+		if ( $row->user_id > 0 ) {
+			$actions['filter_user'] = sprintf(
+				'<a href="%s">%s</a>',
+				esc_url( add_query_arg( 'user_id', (int) $row->user_id, $base ) ),
+				esc_html__( 'Filter by user', 'wp-login-activity' )
+			);
+		}
+
+		if ( $row->ip_address !== '' ) {
+			$actions['filter_ip'] = sprintf(
+				'<a href="%s">%s</a>',
+				esc_url( add_query_arg( 's', $row->ip_address, $base ) ),
+				esc_html__( 'Filter by IP', 'wp-login-activity' )
+			);
+		}
+
+		$delete_url = wp_nonce_url(
+			add_query_arg(
+				[ 'action' => 'delete', 'activity' => (int) $row->id ],
+				$base
+			),
+			'wpla_delete_' . (int) $row->id
+		);
+
+		$actions['delete'] = sprintf(
+			'<a href="%s" class="submitdelete">%s</a>',
+			esc_url( $delete_url ),
+			esc_html__( 'Delete', 'wp-login-activity' )
+		);
+
+		return $this->row_actions( $actions );
+	}
+
+	/**
+	 * Make "user" the row-actions primary column on the full admin
+	 * page (so the View/Delete/Filter links hang off the user cell,
+	 * which is the most identifying column). Compact mode falls back
+	 * to "when" since there's no User column.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	protected function get_default_primary_column_name(): string {
+		return $this->compact ? 'when' : 'user';
+	}
+
+	/**
+	 * Render a row.
+	 *
+	 * Two extras vs the parent:
+	 *   1. Tints the row when it represents the viewer's current
+	 *      session (matched via session-token-hash). Lets people
+	 *      spot "this is the laptop I'm on right now" without hunting.
+	 *   2. Outputs a hidden second `<tr>` beneath the main row for
+	 *      the JS-toggled detail view. Keeps DOM order so screen
+	 *      readers traverse the detail in context.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $item Row.
+	 *
+	 * @return void
+	 */
+	public function single_row( $item ): void {
+		$classes = [];
+
+		if ( $item->is_current_session() ) {
+			$classes[] = 'wpla-current-session';
+		}
+
+		printf(
+			'<tr id="wpla-row-%d" class="%s">',
+			(int) $item->id,
+			esc_attr( implode( ' ', $classes ) )
+		);
+		$this->single_row_columns( $item );
+		echo '</tr>';
+
+		// Detail row — hidden by default; JS toggles `hidden` attr.
+		// Skipped in compact mode (the embed surface is already
+		// space-constrained; full details belong on the main page).
+		if ( ! $this->compact ) {
+			$this->render_detail_row( $item );
+		}
+	}
+
+	/**
+	 * Render the JS-toggled detail row.
+	 *
+	 * Shows everything that doesn't fit in the main columns: raw
+	 * User-Agent, country source, identifier (typed value), referer,
+	 * actor (when distinct from subject), session-current marker,
+	 * UUID. One `<tr><td colspan>` collapsing the detail into a
+	 * single grid cell.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row Row.
+	 *
+	 * @return void
+	 */
+	private function render_detail_row( ActivityRow $row ): void {
+		$column_count = count( $this->get_columns() );
+
+		// Collect KV pairs — only include rows that have meaningful
+		// values, so the detail isn't padded with em-dashes.
+		$pairs = [];
+
+		$pairs[ __( 'When (UTC)',     'wp-login-activity' ) ] = $row->date_created;
+		$pairs[ __( 'Identifier',     'wp-login-activity' ) ] = $row->identifier !== '' ? $row->identifier : '—';
+		$pairs[ __( 'Country source', 'wp-login-activity' ) ] = $row->country_source !== '' ? $row->country_source : '—';
+		$pairs[ __( 'Anonymised IP',  'wp-login-activity' ) ] = $row->get_anonymised_ip() !== '' ? $row->get_anonymised_ip() : '—';
+
+		$browser = $row->get_browser();
+		$os      = $row->get_os();
+		if ( $browser !== '' || $os !== '' ) {
+			$pairs[ __( 'Browser / OS', 'wp-login-activity' ) ] = trim( $browser . ' / ' . $os, ' /' );
+		}
+
+		if ( $row->user_agent !== '' ) {
+			$pairs[ __( 'User-Agent (raw)', 'wp-login-activity' ) ] = $row->user_agent;
+		}
+
+		if ( $row->referer !== '' ) {
+			$pairs[ __( 'Referer', 'wp-login-activity' ) ] = $row->referer;
+		}
+
+		if ( $row->has_distinct_actor() ) {
+			$pairs[ __( 'Performed by', 'wp-login-activity' ) ] = $row->get_actor_display_name();
+		}
+
+		if ( $row->is_current_session() ) {
+			$pairs[ __( 'Session', 'wp-login-activity' ) ] = __( 'This is your current session.', 'wp-login-activity' );
+		}
+
+		$pairs[ __( 'UUID', 'wp-login-activity' ) ] = $row->uuid !== '' ? $row->uuid : '—';
+
+		?>
+		<tr id="wpla-detail-<?php echo (int) $row->id; ?>" class="wpla-detail-row" hidden>
+			<td colspan="<?php echo (int) $column_count; ?>" style="background:#f6f7f7;padding:14px 18px;">
+				<dl style="margin:0;display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:13px;">
+					<?php foreach ( $pairs as $label => $value ) : ?>
+						<dt style="font-weight:600;color:#50575e;"><?php echo esc_html( (string) $label ); ?></dt>
+						<dd style="margin:0;word-break:break-all;"><?php echo esc_html( (string) $value ); ?></dd>
+					<?php endforeach; ?>
+				</dl>
+			</td>
+		</tr>
+		<?php
 	}
 
 	/**
@@ -593,7 +834,96 @@ class ListTable extends WP_List_Table {
 	 * @return string
 	 */
 	public function column_event( ActivityRow $row ): string {
-		return esc_html( $this->event_label( $row->event_type ) );
+		// Colour-coded badge per event type, matching the visual
+		// vocabulary EDD uses for order/payment statuses. Picks a
+		// background + text colour from a fixed palette so admins
+		// can pattern-scan the column at a glance: red = trouble,
+		// green = normal, amber = notable, grey = informational.
+		[ $bg, $fg ] = $this->event_colours( $row->event_type );
+
+		return sprintf(
+			'<span style="display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;background:%s;color:%s;">%s</span>',
+			esc_attr( $bg ),
+			esc_attr( $fg ),
+			esc_html( $this->event_label( $row->event_type ) )
+		);
+	}
+
+	/**
+	 * Pick the badge background + foreground colours for an event.
+	 *
+	 *   login            → green   (normal, expected)
+	 *   logout           → grey    (neutral, informational)
+	 *   login_failed     → red     (negative signal)
+	 *   registered       → blue    (notable but expected)
+	 *   password_changed → amber   (notable, ambiguous severity)
+	 *   email_changed    → amber   (same threat profile as password)
+	 *   admin_assigned   → red     (high-severity security event)
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $event_type Event slug.
+	 *
+	 * @return array{0:string,1:string} `[background, foreground]`.
+	 */
+	private function event_colours( string $event_type ): array {
+		$palette = [
+			'login'            => [ '#dcf5e6', '#1b6e3a' ],  // green
+			'logout'           => [ '#e9eaee', '#50575e' ],  // grey
+			'login_failed'     => [ '#fde2e2', '#9b1c1c' ],  // red
+			'registered'       => [ '#e0ecfb', '#1d4ed8' ],  // blue
+			'password_changed' => [ '#fef3c7', '#92400e' ],  // amber
+			'email_changed'    => [ '#fef3c7', '#92400e' ],  // amber
+			'admin_assigned'   => [ '#fcd5d5', '#7f1d1d' ],  // red (deeper)
+		];
+
+		return $palette[ $event_type ] ?? [ '#e9eaee', '#50575e' ];
+	}
+
+	/**
+	 * "Username" column — the literal user_login string. Hidden by
+	 * default (most admins think in display names); forensic admins
+	 * toggle it on via Screen Options.
+	 *
+	 * For unresolved rows (failed-login attempts on bogus usernames),
+	 * shows whatever the visitor typed via `identifier`.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row Row.
+	 *
+	 * @return string
+	 */
+	public function column_username( ActivityRow $row ): string {
+		if ( $row->user_id > 0 ) {
+			$user = get_userdata( $row->user_id );
+			if ( $user ) {
+				return '<code>' . esc_html( (string) $user->user_login ) . '</code>';
+			}
+		}
+
+		// Unresolved row — use the typed identifier (which may be
+		// what a failed-login attacker typed; admins want to see that
+		// raw, in monospace, to help spot scripted attempts).
+		return $row->identifier !== ''
+			? '<code>' . esc_html( $row->identifier ) . '</code>'
+			: '—';
+	}
+
+	/**
+	 * "Role" column — snapshot of the user's primary role at the
+	 * time of the event.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param ActivityRow $row Row.
+	 *
+	 * @return string
+	 */
+	public function column_role( ActivityRow $row ): string {
+		$label = $row->get_role_label();
+
+		return $label !== '' ? esc_html( $label ) : '—';
 	}
 
 	/**

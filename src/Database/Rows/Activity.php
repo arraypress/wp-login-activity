@@ -35,6 +35,10 @@ use ArrayPress\IPUtils\IP;
  * @property string $country_code
  * @property string $country_source
  * @property string $user_agent
+ * @property string $referer
+ * @property int    $actor_user_id
+ * @property string $user_role
+ * @property string $session_token_hash
  * @property int    $is_new_country
  * @property string $date_created
  * @property string $uuid
@@ -61,6 +65,10 @@ class Activity extends Row {
 		$this->country_code   = (string) ( $this->country_code ?? '' );
 		$this->country_source = (string) ( $this->country_source ?? '' );
 		$this->user_agent     = (string) ( $this->user_agent ?? '' );
+		$this->referer        = (string) ( $this->referer ?? '' );
+		$this->actor_user_id  = (int) ( $this->actor_user_id ?? 0 );
+		$this->user_role           = (string) ( $this->user_role ?? '' );
+		$this->session_token_hash  = (string) ( $this->session_token_hash ?? '' );
 		$this->is_new_country = (int) ( $this->is_new_country ?? 0 );
 		$this->date_created   = (string) ( $this->date_created ?? '' );
 		$this->uuid           = (string) ( $this->uuid ?? '' );
@@ -213,6 +221,111 @@ class Activity extends Row {
 		}
 
 		return (string) ( IP::anonymize( $this->ip_address ) ?? $this->ip_address );
+	}
+
+	/* -------------------------------------------------------------------
+	 * Actor / role helpers
+	 * ----------------------------------------------------------------- */
+
+	/**
+	 * Display name of the user who PERFORMED the action — vs
+	 * `get_display_name()` which returns the SUBJECT user. Differs
+	 * for admin-driven changes ("Alice promoted Bob to admin"); equal
+	 * for self-actions ("Bob changed his own password").
+	 *
+	 * Returns empty string when there's no actor (passive events
+	 * like login / logout / login_failed have no actor distinct from
+	 * the subject).
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	public function get_actor_display_name(): string {
+		if ( $this->actor_user_id <= 0 || $this->actor_user_id === $this->user_id ) {
+			return '';
+		}
+
+		$actor = get_userdata( $this->actor_user_id );
+
+		return $actor ? (string) $actor->display_name : '#' . $this->actor_user_id;
+	}
+
+	/**
+	 * Whether this row represents an action ONE user performed on
+	 * ANOTHER. Useful for differentiating "I changed my password" vs
+	 * "an admin changed my password" in the UI.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return bool
+	 */
+	public function has_distinct_actor(): bool {
+		return $this->actor_user_id > 0
+			&& $this->user_id > 0
+			&& $this->actor_user_id !== $this->user_id;
+	}
+
+	/**
+	 * Human-readable label for the snapshotted role — converts the
+	 * machine slug (`administrator`) to the display label (`Administrator`)
+	 * via WP's role registry. Falls back to the slug when no matching
+	 * role is registered (custom role removed since the event was logged).
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	/**
+	 * Whether this row represents the session the viewer is currently
+	 * using on this device — i.e. the row that authenticated the
+	 * cookie that's making the current request. Lets the UI tint the
+	 * "this is YOUR active session" row à la Google's account-activity
+	 * page, so users can spot unfamiliar parallel sessions instantly.
+	 *
+	 * Returns false when:
+	 *   - We're not inside an authenticated request
+	 *   - The row isn't a successful login event
+	 *   - The row's session-token hash is empty (pre-feature row)
+	 *   - The row belongs to a different user than the viewer
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return bool
+	 */
+	public function is_current_session(): bool {
+		if ( $this->event_type !== 'login' || $this->session_token_hash === '' ) {
+			return false;
+		}
+
+		$current_user_id = get_current_user_id();
+		if ( $current_user_id <= 0 || $current_user_id !== $this->user_id ) {
+			return false;
+		}
+
+		$current_token = function_exists( 'wp_get_session_token' ) ? (string) wp_get_session_token() : '';
+		if ( $current_token === '' ) {
+			return false;
+		}
+
+		return hash_equals( $this->session_token_hash, hash( 'sha256', $current_token ) );
+	}
+
+	public function get_role_label(): string {
+		if ( $this->user_role === '' ) {
+			return '';
+		}
+
+		$role = get_role( $this->user_role );
+		if ( $role && function_exists( 'translate_user_role' ) ) {
+			global $wp_roles;
+			$names = $wp_roles ? $wp_roles->get_names() : [];
+			if ( isset( $names[ $this->user_role ] ) ) {
+				return (string) translate_user_role( $names[ $this->user_role ] );
+			}
+		}
+
+		return ucfirst( $this->user_role );
 	}
 
 }

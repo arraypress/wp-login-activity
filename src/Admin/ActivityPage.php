@@ -102,11 +102,36 @@ class ActivityPage {
 			'option'  => ListTable::PER_PAGE_OPTION,
 		] );
 
+		// Some columns ship hidden by default (Username — forensics
+		// admins toggle it on). WP merges this with each user's saved
+		// preferences so the screen-options checkboxes still win.
+		add_filter( 'default_hidden_columns', [ $this, 'default_hidden_columns' ], 10, 2 );
+
 		$this->maybe_save_extra_screen_options();
 		$this->register_help_tab();
 
 		$this->list_table = new ListTable();
 		$this->list_table->prepare_items();
+	}
+
+	/**
+	 * Apply our default-hidden-columns set on this screen only.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string[]   $hidden Defaults so far.
+	 * @param \WP_Screen $screen Current screen.
+	 *
+	 * @return string[]
+	 */
+	public function default_hidden_columns( $hidden, $screen ): array {
+		$hidden = is_array( $hidden ) ? $hidden : [];
+
+		if ( $screen && $screen->id === $this->hook ) {
+			$hidden = array_unique( array_merge( $hidden, ListTable::get_default_hidden_columns() ) );
+		}
+
+		return $hidden;
 	}
 
 	/**
@@ -317,6 +342,56 @@ class ActivityPage {
 				<?php $this->list_table->display(); ?>
 			</form>
 		</div>
+
+		<?php $this->print_inline_assets(); ?>
+		<?php
+	}
+
+	/**
+	 * Tiny inline JS + CSS for the row-actions detail-row toggle and
+	 * the current-session highlight tint.
+	 *
+	 * Inlined rather than enqueued because the surface is ~30 lines
+	 * — a separate asset file would cost a network round-trip on
+	 * every admin pageview for trivial styling.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return void
+	 */
+	private function print_inline_assets(): void {
+		?>
+		<style>
+			.wpla-current-session > td { background: #f0f6ff !important; }
+			.wpla-current-session > td:first-child { box-shadow: inset 3px 0 0 0 #2271b1; }
+			.wpla-detail-row > td { border-top: 0 !important; }
+			.wpla-toggle-details { cursor: pointer; }
+		</style>
+		<script>
+			document.addEventListener( 'click', function ( e ) {
+				var trigger = e.target.closest( '.wpla-toggle-details' );
+				if ( ! trigger ) {
+					return;
+				}
+				e.preventDefault();
+				var rowId = trigger.getAttribute( 'data-row-id' );
+				if ( ! rowId ) {
+					return;
+				}
+				var detail = document.getElementById( 'wpla-detail-' + rowId );
+				if ( ! detail ) {
+					return;
+				}
+				var isHidden = detail.hasAttribute( 'hidden' );
+				if ( isHidden ) {
+					detail.removeAttribute( 'hidden' );
+					trigger.setAttribute( 'aria-expanded', 'true' );
+				} else {
+					detail.setAttribute( 'hidden', '' );
+					trigger.setAttribute( 'aria-expanded', 'false' );
+				}
+			} );
+		</script>
 		<?php
 	}
 

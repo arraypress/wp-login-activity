@@ -284,15 +284,19 @@ class Logger {
 		$country = $this->resolve_country();
 
 		$row_id = Plugin::query()->add_item( [
-			'user_id'        => $user_id,
-			'identifier'     => $identifier,
-			'event_type'     => $event_type,
-			'ip_address'     => $ip,
-			'country_code'   => $country['code'],
-			'country_source' => $country['source'],
-			'user_agent'     => $this->resolve_user_agent(),
-			'is_new_country' => $this->is_first_time_country( $user_id, $country['code'] ) ? 1 : 0,
-			'date_created'   => current_time( 'mysql', true ),
+			'user_id'            => $user_id,
+			'identifier'         => $identifier,
+			'event_type'         => $event_type,
+			'ip_address'         => $ip,
+			'country_code'       => $country['code'],
+			'country_source'     => $country['source'],
+			'user_agent'         => $this->resolve_user_agent(),
+			'referer'            => $this->resolve_referer(),
+			'actor_user_id'      => $this->resolve_actor_user_id( $user_id, $event_type ),
+			'user_role'          => $this->resolve_subject_role( $user_id ),
+			'session_token_hash' => $this->resolve_session_token_hash( $event_type ),
+			'is_new_country'     => $this->is_first_time_country( $user_id, $country['code'] ) ? 1 : 0,
+			'date_created'       => current_time( 'mysql', true ),
 		] );
 
 		if ( ! $row_id ) {
@@ -443,6 +447,127 @@ class Logger {
 		}
 
 		return mb_substr( (string) wp_check_invalid_utf8( $ua ), 0, 1024 );
+	}
+
+	/**
+	 * Get the HTTP referer header. Trimmed to a sane length to defend
+	 * against poison data and capped at the column size.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string
+	 */
+	private function resolve_referer(): string {
+		if ( empty( $_SERVER['HTTP_REFERER'] ) ) {
+			return '';
+		}
+
+		$ref = wp_check_invalid_utf8( (string) $_SERVER['HTTP_REFERER'] );
+
+		// esc_url_raw rejects garbage and returns '' on invalid URLs.
+		// We don't reject empty results — an event without a referer
+		// is itself useful audit data ("logged in directly, not from
+		// the login page").
+		$ref = esc_url_raw( $ref );
+
+		return mb_substr( (string) $ref, 0, 500 );
+	}
+
+	/**
+	 * Resolve the actor — who PERFORMED the action.
+	 *
+	 * For self-driven events (login / logout / failed-login / register
+	 * / password-reset via lost-password flow), the subject IS the
+	 * actor. For admin-driven events (admin promotes a user, admin
+	 * changes another user's password) `wp_get_current_user()` at
+	 * write time IS the actor.
+	 *
+	 * Returns 0 for events with no resolvable user context (anonymous
+	 * failed-login attempts, registration when there's no logged-in
+	 * actor).
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param int    $subject_user_id The user the event is ABOUT.
+	 * @param string $event_type      The event slug.
+	 *
+	 * @return int
+	 */
+	private function resolve_actor_user_id( int $subject_user_id, string $event_type ): int {
+		// Login / logout / failed-login don't have a separate actor —
+		// the subject IS the actor (or there isn't one for failed
+		// logins). Skip the wp_get_current_user() lookup entirely.
+		if ( in_array( $event_type, [ 'login', 'logout', 'login_failed', 'registered' ], true ) ) {
+			return $subject_user_id;
+		}
+
+		$actor_id = (int) get_current_user_id();
+
+		// Profile self-edits return the same ID either way.
+		return $actor_id > 0 ? $actor_id : $subject_user_id;
+	}
+
+	/**
+	 * Snapshot the subject user's primary role at write time so a
+	 * later role change (or user deletion) doesn't rewrite history.
+	 *
+	 * Returns the FIRST role on the user — multi-role users are
+	 * comparatively rare and the column is sized for a single slug.
+	 * Sites that genuinely need multi-role audit can add a second
+	 * column or switch the column to TEXT.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param int $user_id The subject user.
+	 *
+	 * @return string
+	 */
+	private function resolve_subject_role( int $user_id ): string {
+		if ( $user_id <= 0 ) {
+			return '';
+		}
+
+		$user = get_userdata( $user_id );
+		if ( ! $user || empty( $user->roles ) || ! is_array( $user->roles ) ) {
+			return '';
+		}
+
+		return (string) reset( $user->roles );
+	}
+
+	/**
+	 * Hash the WP session token for the current request, so the
+	 * "current session" indicator in the UI can match against it
+	 * later. Only meaningful for `login` events — other events
+	 * inherit their session from whatever the actor was already
+	 * authenticated as, which would make the matching ambiguous.
+	 *
+	 * Hashed with SHA-256 — the raw token is a credential equivalent
+	 * to a password (anyone holding it can ride the user's session),
+	 * so storing it plain in the DB would be a credential leak waiting
+	 * for a backup-dump compromise.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $event_type The event slug.
+	 *
+	 * @return string Empty when we shouldn't / can't capture.
+	 */
+	private function resolve_session_token_hash( string $event_type ): string {
+		if ( $event_type !== 'login' ) {
+			return '';
+		}
+
+		if ( ! function_exists( 'wp_get_session_token' ) ) {
+			return '';
+		}
+
+		$token = (string) wp_get_session_token();
+		if ( $token === '' ) {
+			return '';
+		}
+
+		return hash( 'sha256', $token );
 	}
 
 	/**
