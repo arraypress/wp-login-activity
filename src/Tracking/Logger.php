@@ -428,75 +428,37 @@ class Logger {
 	/**
 	 * Get the visitor's IP address.
 	 *
-	 * Two-step resolution:
+	 * Delegated entirely to wp-ip-utils, which reads forwarding headers
+	 * only when the request actually arrived from a trusted proxy, and
+	 * walks `X-Forwarded-For` from the right-hand end.
 	 *
-	 *   1. Strict pass via wp-ip-utils `IP::get()` — handles the
-	 *      CF-Connecting-IP / X-Forwarded-For / X-Real-IP / REMOTE_ADDR
-	 *      cascade AND rejects private/loopback addresses (defence
-	 *      against a misconfigured proxy spoofing 127.0.0.1).
+	 * `$allow_private` keeps loopback and RFC 1918 addresses rather than
+	 * discarding them — on local dev, an intranet, or in Docker, "logged
+	 * in from 192.168.1.50" is exactly the audit data we want. Filter
+	 * `wp_login_activity_allow_private_ip` to false for the stricter
+	 * behaviour.
 	 *
-	 *   2. Permissive fallback when the strict pass returns null. This
-	 *      happens on local dev (loopback only), intranet deployments
-	 *      (RFC1918 ranges), and Docker containers (link-local). For
-	 *      a *login activity* tracker we genuinely want to capture
-	 *      these — "logged in from 192.168.1.50" is useful audit data.
-	 *      Walks the same header order, accepting any valid IP.
-	 *
-	 * Sites that want the strict behaviour back can short-circuit
-	 * step 2 by returning the original `$ip` from
-	 * `wp_login_activity_visitor_ip` regardless of context, or by
-	 * filtering `wp_login_activity_allow_private_ip` to false.
+	 * This used to fall back to its own header cascade when the strict
+	 * pass returned nothing, which meant walking CF-Connecting-IP /
+	 * X-Real-IP / Client-IP / X-Forwarded-For with no trust check and
+	 * taking the leftmost entry — the one part of that header a client
+	 * controls. Anyone could then make a failed login appear to come from
+	 * any address they chose, which in an audit log is worse than having
+	 * no address at all. See wp-ip-utils 1.1.0 and 1.1.1.
 	 *
 	 * @since 2.0.0
+	 * @since 2.0.1 Trust-gated; the inline fallback cascade was removed.
 	 *
 	 * @return string
 	 */
 	private function resolve_ip(): string {
-		$ip = (string) ( IP::get() ?? '' );
+		$allow_private = (bool) apply_filters( 'wp_login_activity_allow_private_ip', true );
 
-		if ( $ip === '' && apply_filters( 'wp_login_activity_allow_private_ip', true ) ) {
-			$ip = $this->resolve_private_ip_fallback();
-		}
+		$ip = (string) ( IP::get( $allow_private ) ?? '' );
 
 		return (string) apply_filters( 'wp_login_activity_visitor_ip', $ip );
 	}
 
-	/**
-	 * Permissive IP scan — accepts private + loopback addresses.
-	 *
-	 * Walks the same header priority as wp-ip-utils but skips the
-	 * `is_private()` rejection. Used only when the strict pass
-	 * returned nothing.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @return string Empty when no valid IP is present at all.
-	 */
-	private function resolve_private_ip_fallback(): string {
-		$candidates = [
-			'HTTP_CF_CONNECTING_IP',
-			'HTTP_X_REAL_IP',
-			'HTTP_CLIENT_IP',
-			'HTTP_X_FORWARDED_FOR',
-			'REMOTE_ADDR',
-		];
-
-		foreach ( $candidates as $header ) {
-			if ( empty( $_SERVER[ $header ] ) ) {
-				continue;
-			}
-
-			// X-Forwarded-For can be a comma-list — leftmost is the
-			// closest-to-client address.
-			$candidate = trim( explode( ',', (string) $_SERVER[ $header ] )[0] );
-
-			if ( filter_var( $candidate, FILTER_VALIDATE_IP ) ) {
-				return $candidate;
-			}
-		}
-
-		return '';
-	}
 
 	/**
 	 * Resolve the country for the current request via visitor-country.
